@@ -24,3 +24,15 @@ D0 布局准备完成；D1–D7 尚未验收。硬件 C1–C5、H0–H5、板级
 证据：/home/dev/ws_iap/uwb_ros2/evidence/d1-red.log（实现前链接失败）、d1-build.log、d1-test.log；独立 CMake Debug + ASan/UBSan 两项 CTest 通过，黄金向量、2000 组固定种子跨语言对照与非法字段测试。
 
 首次 sanitizer 运行因 data-run 注入线程命名 shim 的 LD_PRELOAD 顺序失败；保留 shim 与全部存储保护，设置 ASAN_OPTIONS=verify_asan_link_order=0 后通过。该参数只允许现有 preload 排序，不关闭地址/未定义行为检查。
+
+## D2/D3：ROS2 串口驱动
+
+Jazzy ament/rosidl/rclcpp 构建并安装成功（d2-build-retry.log）。原 LinkTrack Anchor0/Tag0/Node0–6 原话题保留，Frame0/2/3/5/6 增加 stamped。原 ROS1 及非 LinkTrack 源码保留，但不在活动 target。serial 以普通 Linux CMake target 链接，vendor COLCON_IGNORE 防止独立发现。
+
+- 恢复所有原帧 local_time 设备毫秒；Frame3 Header 与 context 相同。Node1 vendored unpack 遗漏 role 赋值，已按原始头字段补上，不改 wire。
+- 验证长度/checksum/count/block（含 224 B vendor 单 block 容量）后才 unpack，按返回值门控发布；malloc 失败原宏已有 return 0，保留。
+- 有界 framer、100 ms 半帧超时恢复、单串口单 executor、完成 read 时间、不同帧独立序号；重连清 RX/TX 并换 session。
+- legacy TX 默认禁用，开启时上限 100 B/包、8 包、25 ms 间隔、50 ms 过期，部分写计失败。
+- d3-framer.log：ASan/UBSan，原始九组夹具 1785 切点，坏长度/checksum/block 恢复，1 MB 垃圾输入资源上限。
+- d3-pty.json 与 /home/dev/ws_iap/uwb_ros2/pty-driver/driver.log：真实 PTY → ROS2 原始/stamped，全部 LinkTrack 帧、设备时间、关键距离/数传长度、Frame3 所有切点与故障恢复通过。此处为软件模拟，不是射频证据。
+- 尚需 D7 扩展端到端故障/负载/拔插与全字段回归；当前不宣称 S1–S9 全部完成。

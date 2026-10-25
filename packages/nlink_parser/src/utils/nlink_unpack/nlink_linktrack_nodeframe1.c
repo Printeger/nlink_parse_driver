@@ -48,6 +48,7 @@ static uint8_t UnpackData(const uint8_t *data, size_t data_length) {
 
   memcpy(&g_frame, data, g_nlt_nodeframe1.fixed_part_size);
 
+  g_nlt_nodeframe1.result.role = g_frame.role;
   g_nlt_nodeframe1.result.id = g_frame.id;
   g_nlt_nodeframe1.result.local_time = g_frame.local_time;
   g_nlt_nodeframe1.result.system_time = g_frame.system_time;
