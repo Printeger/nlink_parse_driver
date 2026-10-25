@@ -36,3 +36,13 @@ Jazzy ament/rosidl/rclcpp 构建并安装成功（d2-build-retry.log）。原 Li
 - d3-framer.log：ASan/UBSan，原始九组夹具 1785 切点，坏长度/checksum/block 恢复，1 MB 垃圾输入资源上限。
 - d3-pty.json 与 /home/dev/ws_iap/uwb_ros2/pty-driver/driver.log：真实 PTY → ROS2 原始/stamped，全部 LinkTrack 帧、设备时间、关键距离/数传长度、Frame3 所有切点与故障恢复通过。此处为软件模拟，不是射频证据。
 - 尚需 D7 扩展端到端故障/负载/拔插与全字段回归；当前不宣称 S1–S9 全部完成。
+
+## D4/D5：统一消息、身份、即时 bridge、时间及会话
+
+四包 Jazzy 构建通过：d5-build.log。新消息逐字段取自手册，仅 ROS2 Time 语法迁移。独立 registry 校验 raw/system/mode/role/uint32 ID 与逻辑身份，接收者 N0 与内层 reporter 双重检查。按 sender 独立 envelope（100 B、250 ms），本地/每个分包即时发布。
+
+有界双层去重：每 sender 最多32序号记录、127回溯窗口、最大前进1000000；包/观测各最多10000身份键，10 s 退休。退休 floor 防止过期重放复活；每 sender 最多64旧 boot，端口64旧会话，耗尽时拒绝新会话并计数，需显式新数据集。双向来源保留。
+
+帧级时钟128样本线性漂移/偏移拟合，检测毫秒回绕、重启和 ROS 跳变。单向绝对延迟不可辨识，uncertainty 始终 NaN；远端只有明确共享时钟域才能映射，DR_MODE1 禁用 system_time。回放使用记录 context，倒退或 reset_replay 开启新 dataset；无效 source stamp=0、freshness=false。
+
+证据：d5-state.log（缓存/回绕/时钟），d5-pty.log 与 pty-bridge-v4/faults 日志（24条预期观测、串口输入故障恢复/去重/部分分包/重连）。详细负载、资源、录放和其他帧适配由 D7 完成。

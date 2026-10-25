@@ -1,0 +1,20 @@
+/uwb/n0/nlink_linktrack_nodeframe3_stamped:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe0_stamped:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/liuo/uwb/observations:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/liuo/uwb/diagnostics:
+  reliability: reliable
+  durability: volatile
+  history: keep_last
+  depth: 10

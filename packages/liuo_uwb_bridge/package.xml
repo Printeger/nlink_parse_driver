@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<package format="3">
+ <name>liuo_uwb_bridge</name><version>1.0.0</version><description>Event driven UWB identity, relay and frame time bridge</description>
+ <maintainer email="dev@example.invalid">UWB maintainers</maintainer><license>MIT</license>
+ <buildtool_depend>ament_cmake</buildtool_depend><depend>rclcpp</depend><depend>nlink_parser</depend><depend>liuo_uwb_msgs</depend><depend>liuo_uwb_protocol</depend><depend>diagnostic_msgs</depend><depend>std_srvs</depend><depend>yaml-cpp</depend><exec_depend>launch_ros</exec_depend><exec_depend>ament_index_python</exec_depend>
+ <export><build_type>ament_cmake</build_type></export>
+</package>
