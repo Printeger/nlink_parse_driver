@@ -16,3 +16,11 @@
 ## 状态
 
 D0 布局准备完成；D1–D7 尚未验收。硬件 C1–C5、H0–H5、板级烧录及 LIUO 接入均未执行。
+
+## D1：协议核心
+
+固定容量（Packet 5 条、binary 72 B、wire 100 B）C++17 codec，无 ROS/HAL/串口依赖，显式错误码，失败不覆盖输出 Packet。附录 B 原样提取为独立 Python 参考实现。
+
+证据：/home/dev/ws_iap/uwb_ros2/evidence/d1-red.log（实现前链接失败）、d1-build.log、d1-test.log；独立 CMake Debug + ASan/UBSan 两项 CTest 通过，黄金向量、2000 组固定种子跨语言对照与非法字段测试。
+
+首次 sanitizer 运行因 data-run 注入线程命名 shim 的 LD_PRELOAD 顺序失败；保留 shim 与全部存储保护，设置 ASAN_OPTIONS=verify_asan_link_order=0 后通过。该参数只允许现有 preload 排序，不关闭地址/未定义行为检查。

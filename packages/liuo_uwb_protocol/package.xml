@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>liuo_uwb_protocol</name><version>1.0.0</version>
+  <description>Bounded portable LIUO Range Relay v1 codec</description>
+  <maintainer email="dev@example.invalid">UWB maintainers</maintainer>
+  <license>MIT</license><buildtool_depend>ament_cmake</buildtool_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
