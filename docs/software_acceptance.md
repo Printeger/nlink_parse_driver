@@ -77,7 +77,7 @@ RSS包含ros2 CLI父进程与节点子进程，不能当成纯C++堆大小。短
 
 6项已关闭：MCU越界、跨话题丢帧/误重放重置、恢复帧read时间、停更统计、expiry误删新半帧、远端独立到达时ROS跳变映射失效。对应公共PTY/stamped或无ROS回归均保留。审查不能替代测试；最终通过依据上列实际执行记录。
 
-两轴初始最严重问题均涉及MCU越界/观测丢失，现已修复。失败构建、初始不通过测试及原因保留在evidence与[实施日志](ros2_implementation_log.md)，没有删除失败用例、放宽频率或隐藏unknown达成验收。
+两轴初始最严重问题均涉及MCU越界/观测丢失，现已修复。最终证据SHA-256及重复模拟bag退休记录见[manifest.json](/home/dev/ws_iap/uwb_ros2/evidence/manifest.json)；保留最终引用的bag，早期重复bag已删除并在原目录availability.json标记。失败构建、初始不通过测试及原因保留在evidence与[实施日志](ros2_implementation_log.md)，没有删除失败用例、放宽频率或隐藏unknown达成验收。
 
 ## Git与剩余事项
 

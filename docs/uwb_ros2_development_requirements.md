@@ -2,7 +2,7 @@
 
 版本：v1.0；日期：2026-10-26（Asia/Shanghai）。
 
-状态：开发输入，尚未实施或验收。本轮仅编写本需求书与 [开发 goal prompt](uwb_ros2_development_goal_prompt.md)，保存当前代码基线并提交 Git。
+状态：本需求书作为冻结开发输入保留；ROS2软件实现与验收已完成，见 [软件验收报告](software_acceptance.md)。板级、真实无线、数小时实测及LIUO接入仍未执行。本文最初与 [开发 goal prompt](uwb_ros2_development_goal_prompt.md) 一起保存于开发前基线；下列合同未因验收而放宽。
 
 ## 1. 目标、依据与交付边界
 

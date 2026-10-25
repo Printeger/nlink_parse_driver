@@ -1,5 +1,7 @@
 # LIUO UWB 驱动设计与修改 Handbook
 
+> 实施状态补记：本文保留原始设计与协议约定；当前ROS2软件交付及真实测试证据见[软件验收报告](software_acceptance.md)。下文ROS1路线属于原始设计背景，ROS2迁移差异按[需求书](uwb_ros2_development_requirements.md)执行。板级/无线实测未完成。
+
 ## 基于 Nooploop `nlink_parser` 的方案 B：固定节点 + MCU + UWB 自带数传
 
 **版本：** v1.0  
