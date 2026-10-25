@@ -46,3 +46,21 @@ Jazzy ament/rosidl/rclcpp 构建并安装成功（d2-build-retry.log）。原 Li
 帧级时钟128样本线性漂移/偏移拟合，检测毫秒回绕、重启和 ROS 跳变。单向绝对延迟不可辨识，uncertainty 始终 NaN；远端只有明确共享时钟域才能映射，DR_MODE1 禁用 system_time。回放使用记录 context，倒退或 reset_replay 开启新 dataset；无效 source stamp=0、freshness=false。
 
 证据：d5-state.log（缓存/回绕/时钟），d5-pty.log 与 pty-bridge-v4/faults 日志（24条预期观测、串口输入故障恢复/去重/部分分包/重连）。详细负载、资源、录放和其他帧适配由 D7 完成。
+
+## D7 审查与故障修复
+
+使用code-review技能按Standards/Spec两轴并行只读审查，基线5680f76；范围直接采用本地需求书，无远程issue操作。
+
+Standards轴：未发现存储规则违规；发现MCU255条重复peer越界、跨话题共用时间水位、SequenceWindow零容量，以及bridge职责较集中（判断性维护建议）。前三项已修复；保留ROS适配层，状态/registry/codec已有独立模块，进一步拆分不影响合同，未扩展本次架构范围。
+
+Spec轴：上述越界与跨话题问题，加上坏长度恢复context错误、停更诊断窗口冻结，均补回归修复。复审又发现全局expiry误删新半帧、短半头不清、只有远端输入时ROS跳变未使共享映射失效，已逐候选过期/接收context层时钟跳变检查修复。
+
+扩展ASan/UBSan到真实vendored unpack发现int24左移有符号溢出；已改为无符号组装并显式符号扩展，黄金原字段保持一致。分配失败注入验证返回失败、不交付旧结果、后续好帧恢复。sanitizer使用UBSAN_OPTIONS=halt_on_error=1，不以仅打印错误后退出0当通过。
+
+存储保护曾拒绝colcon test-result默认源码log目录；修复工具传入显式--log-base，没有绕过data-run。首次record脚本在source Jazzy时被nounset阻止，改为仅source期间set +u，实际bag录放随后通过。所有失败日志保留在evidence中，验收报告仅引用对应最终通过日志。
+
+## 最终软件验收
+
+ef3db9fac5e31836cb3319d0708c0db34ec4524f执行最终全套验证。四包构建/安装、colcon三项、真实vendor unpack ASan/UBSan与分配失败、MCU ASan/UBSan、164字段PTY、身份/时间/资源/重连、legacy TX、60秒逐边负载、安装launch与真实rosbag2两次回放均通过。最终证据文件使用evidence/final-*，详见software_acceptance.md。
+
+结论为软件完成，不是软件加真实硬件完成。未push、未修改相邻LIUO。所有硬件与数小时未执行项独立列出。
