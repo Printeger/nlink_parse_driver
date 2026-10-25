@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import signal
 import subprocess
 import time
@@ -39,6 +40,19 @@ try:
     spin(2)
     for wire in fixtures:os.write(master,wire);spin(0.1)
     spin(0.3)
+    expected=json.loads((root/'packages/nlink_parser/test/linktrack_expected.json').read_text())
+    checked=0
+    for name,checks in expected.items():
+        actual=received[next(k for k in received if k.lower()==name)][-1]
+        for field,want,tolerance in checks:
+            value=actual
+            for part in field.split('.'):
+                if part=='size()':value=len(value);continue
+                m=re.fullmatch(r'(\w+)(?:\[(\d+)\])?',part)
+                value=getattr(value,m[1])
+                if m[2] is not None:value=value[int(m[2])]
+            assert abs(value-want)<=tolerance,(name,field,value,want)
+            checked+=1
     for name,local,system,voltage in [('Anchorframe0',33313,32000,4.995),('Tagframe0',44556,71627,4.948),('Nodeframe1',34304,33000,4.936),('Nodeframe2',9157,1926842,4.973),('Nodeframe3',463352,7262319,4.954),('Nodeframe4',106020,106020,4.44),('Nodeframe5',463352,7262319,4.954)]:
         m=received[name][-1];assert m.local_time==local and m.system_time==system,(name,m)
         assert abs(m.voltage-voltage)<0.001
@@ -53,6 +67,7 @@ try:
         assert len(received['Nodeframe3'])==initial+cut-1
         os.write(master,f3[cut:]);wait_count('Nodeframe3',initial+cut)
     before=len(received['Nodeframe3']);os.write(master,f3*3);wait_count('Nodeframe3',before+3)
+    spin(.05)
     wrapped=received['Nodeframe3Stamped'][-3:]
     assert len({x.context.rx_frame_seq for x in wrapped})==3
     assert all(x.frame.header==x.context.header for x in wrapped)
@@ -61,7 +76,14 @@ try:
     os.write(master,b'garbage'+bad+f3);wait_count('Nodeframe3',before+1)
     before=len(received['Nodeframe3']);bad=bytearray(f3);bad[-1]^=1
     os.write(master,bad+f3);wait_count('Nodeframe3',before+1)
-    print(json.dumps({'status':'PASS','source':'software PTY','raw_frames':{k:len(v) for k,v in received.items()},'checks':['all imported LinkTrack types','device milliseconds','raw/stamped equal','Frame3 every split','concatenation sequences','bad length/checksum recovery']},indent=2))
+    spin(.05)
+    before=len(received['Nodeframe3Stamped'])
+    os.write(master,bytes([0x55,2,0,32,0,0,0,0,0,0,1])+f3)
+    spin(.03);noise_time=time.time_ns();os.write(master,b'noise');spin(.2)
+    assert len(received['Nodeframe3Stamped'])==before+1
+    delayed=received['Nodeframe3Stamped'][-1].context.header.stamp
+    assert delayed.sec*1000000000+delayed.nanosec<noise_time
+    print(json.dumps({'status':'PASS','source':'software PTY','preserved_field_assertions':checked,'raw_frames':{k:len(v) for k,v in received.items()},'checks':['all imported LinkTrack types','device milliseconds','raw/stamped equal','Frame3 every split','concatenation sequences','bad length/checksum recovery']},indent=2))
 finally:
     os.killpg(proc.pid,signal.SIGINT)
     try:proc.wait(timeout=5)

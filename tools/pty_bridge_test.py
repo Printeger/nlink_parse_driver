@@ -50,12 +50,13 @@ def packet(reporter=1,seq=1,cycle=1,boot=42,peers=(2,),shard=0,shards=1):
     return Packet(7,reporter,boot,cycle,seq,seq*20&0xffffffff,seq*20&0xffffffff,12,shard,shards,tuple(Edge(p,3,10000,160,150) for p in peers))
 
 class Harness:
-    def __init__(self,out,frame=3,data=0,mode='unconfirmed',wide=False,lp=False,keys=10000):
-        self.out=out;out.mkdir(parents=True,exist_ok=True);self.messages=[];self.diags=[];self.latencies=[]
+    def __init__(self,out,frame=3,data=0,mode='unconfirmed',wide=False,lp=False,keys=10000,shared=False):
+        self.out=out;out.mkdir(parents=True,exist_ok=True);self.messages=[];self.diags=[];self.driver_diags=[];self.latencies=[]
         self.node=rclpy.create_node('bridge_acceptance')
         qos=QoSProfile(depth=100,reliability=ReliabilityPolicy.BEST_EFFORT)
         self.sub=self.node.create_subscription(UwbObservationBatch,'/liuo/uwb/observations',self.receive,qos)
         self.diag=self.node.create_subscription(DiagnosticArray,'/liuo/uwb/diagnostics',lambda m:self.diags.append(m),10)
+        self.driver_diag=self.node.create_subscription(DiagnosticArray,'/uwb/n0/nlink_diagnostics',lambda m:self.driver_diags.append(m),10)
         self.master,self.slave=pty.openpty();self.port=out/'serial';self.port.symlink_to(os.ttyname(self.slave))
         self.registry=out/'registry.yaml'
         rows=[]
@@ -68,7 +69,7 @@ class Harness:
         self.registry.write_text('nodes:\n'+'\n'.join(rows)+'\n')
         self.procs=[];self.logs=[]
         self.start(['ros2','run','nlink_parser','linktrack','--ros-args','-r','__ns:=/uwb/n0','-p',f'port_name:={self.port}'],'driver')
-        self.start(['ros2','run','liuo_uwb_bridge','range_bridge','--ros-args','-p',f'registry_path:={self.registry}','-p',f'operating_mode:={mode}','-p',f'range_frame:={frame}','-p',f'data_frame:={data}','-p','simulator:=true','-p',f'dedup_max_entries:={keys}'],'bridge')
+        self.start(['ros2','run','liuo_uwb_bridge','range_bridge','--ros-args','-p',f'registry_path:={self.registry}','-p',f'operating_mode:={mode}','-p',f'range_frame:={frame}','-p',f'data_frame:={data}','-p','simulator:=true','-p',f'dedup_max_entries:={keys}','-p',f'shared_system_clock:={str(shared).lower()}','-p','clock_domain:=test_clock'],'bridge')
         self.spin(2)
     def receive(self,m):self.messages.append((time.monotonic(),m))
     def start(self,cmd,name):
@@ -157,13 +158,25 @@ def adapters(out):
     return results
 
 def load(out,seconds):
-    h=Harness(out/'load');start=time.monotonic();next_local=start;next_remote=start;seq=0;cycle=0;peers=tuple(range(1,10));sent=Counter();arrivals=[]
+    h=Harness(out/'load');memory=[];next_memory=0;start=time.monotonic();next_local=start;next_remote=start;seq=0;cycle=0;peers=tuple(range(1,10));sent=Counter();arrivals=[]
     # This subscriber deliberately stalls on a separate executor/process, never the driver.
     slow=out/'slow.py';slow.write_text('import rclpy,time\nfrom liuo_uwb_msgs.msg import UwbObservationBatch\nfrom rclpy.qos import QoSProfile,ReliabilityPolicy\nrclpy.init();n=rclpy.create_node("slow_subscriber");s=n.create_subscription(UwbObservationBatch,"/liuo/uwb/observations",lambda m:time.sleep(.2),QoSProfile(depth=2,reliability=ReliabilityPolicy.BEST_EFFORT));rclpy.spin(n)\n')
     h.start([sys.executable,str(slow)],'slow')
     try:
         while time.monotonic()<start+seconds:
             now=time.monotonic()
+            if now>=next_memory:
+                def rss_tree(pid):
+                    total=0
+                    try:
+                        status=Path(f'/proc/{pid}/status').read_text()
+                        total=int(next(x.split()[1] for x in status.splitlines() if x.startswith('VmRSS:')))
+                        children=Path(f'/proc/{pid}/task/{pid}/children').read_text().split()
+                        total+=sum(rss_tree(int(c)) for c in children)
+                    except (FileNotFoundError,StopIteration,ProcessLookupError):pass
+                    return total
+                memory.append({'elapsed_s':now-start,'driver_kib':rss_tree(h.procs[0].pid),'bridge_kib':rss_tree(h.procs[1].pid)})
+                next_memory=now+1
             if now>=next_local:
                 seq+=1;h.send(range_frame(seq,peers=peers));sent['local_frames']+=1;next_local+=.02
             if now>=next_remote:
@@ -190,7 +203,7 @@ def load(out,seconds):
         diag={v.key:v.value for v in h.diags[-1].status[0].values} if h.diags else {}
         assert int(diag.get('packet_cache_keys','10001'))<=10000
         assert int(diag.get('observation_cache_keys','10001'))<=10000
-        return {'status':'PASS','source':'software PTY, no RF','seconds':seconds,'sent':dict(sent),'local_edge_hz':local,'remote_edge_hz':remote,'10s_windows':[{f'{a}->{b}':n/10 for (a,b),n in w.items()} for w in windows],'diagnostics':diag}
+        return {'status':'PASS','source':'software PTY, no RF','seconds':seconds,'memory_samples':memory,'sent':dict(sent),'local_edge_hz':local,'remote_edge_hz':remote,'10s_windows':[{f'{a}->{b}':n/10 for (a,b),n in w.items()} for w in windows],'diagnostics':diag,'driver_diagnostics':{v.key:v.value for v in h.driver_diags[-1].status[0].values} if h.driver_diags else {}}
     finally:h.close()
 
 def main():

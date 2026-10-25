@@ -8,6 +8,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <stdexcept>
 #include <vector>
 namespace liuo::uwb {
 // Each window has a permanent retirement floor. TTL/capacity eviction never
@@ -15,7 +16,7 @@ namespace liuo::uwb {
 class SequenceWindow {
   struct Record {uint64_t time;std::bitset<256> keys;};
  public:
-  SequenceWindow(size_t capacity=32):capacity_(capacity) {}
+  SequenceWindow(size_t capacity=32):capacity_(capacity) {if(!capacity)throw std::invalid_argument("zero sequence capacity");}
   bool accept(uint32_t seq,uint8_t key,uint64_t now) {
     expire(now);
     int64_t index=seq;

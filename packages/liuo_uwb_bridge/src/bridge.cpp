@@ -23,7 +23,7 @@ uint64_t steady(){return std::chrono::duration_cast<std::chrono::nanoseconds>(st
 int64_t ns(const builtin_interfaces::msg::Time& t){return int64_t(t.sec)*1000000000+t.nanosec;}
 builtin_interfaces::msg::Time stamp(int64_t n){return rclcpp::Time(std::max<int64_t>(0,n));}
 struct Source {
- uint32_t boot{};uint64_t session{};std::vector<uint32_t> dead;
+ uint32_t boot{},last_cycle{},last_source{};uint64_t session{},received_cycles{},complete_cycles{};std::vector<uint32_t> dead;
  SequenceWindow packets,observations;EnvelopeStream stream;
  struct Cycle {uint8_t expected;std::bitset<51> shards;uint64_t time;};
  std::map<uint32_t,Cycle> cycles;
@@ -73,17 +73,20 @@ class Bridge:public rclcpp::Node {
     timer_=create_wall_timer(std::chrono::seconds(1),[this]{diagnostics();});
   }
  private:
-  void reset_dataset(){driver_session_=new_session();session_counter_=0;port_=0;last_rx_seq_=0;last_mono_=0;dead_ports_.clear();local_session_=++session_counter_;clock_.clear();system_clock_.clear();for(auto& s:sources_)s.second=Source{};rates_.clear();source_rate_=Rate{};packet_rate_=Rate{};}
+  void reset_dataset(){driver_session_=new_session();session_counter_=0;port_=0;last_rx_seq_=0;last_mono_=0;stream_mono_.fill(0);have_ros_offset_=false;dead_ports_.clear();local_session_=++session_counter_;clock_.clear();system_clock_.clear();for(auto& s:sources_)s.second=Source{};rates_.clear();source_rate_=Rate{};packet_rate_=Rate{};}
   bool context(const Context& c){
-    if(!c.port_session_id || !c.rx_frame_seq){++errors_["invalid_context"];return false;}
-    if(replay_ && port_==c.port_session_id && c.host_monotonic_ns<last_mono_){reset_dataset();++errors_["replay_dataset_reset"];}
+    if(!c.port_session_id || !c.rx_frame_seq || c.function_mark>=stream_mono_.size()){++errors_["invalid_context"];return false;}
+    if(replay_ && port_==c.port_session_id && c.host_monotonic_ns<stream_mono_[c.function_mark]){reset_dataset();++errors_["replay_dataset_reset"];}
     if(c.port_session_id!=port_){
       if(std::find(dead_ports_.begin(),dead_ports_.end(),c.port_session_id)!=dead_ports_.end() || dead_ports_.size()>=64){++errors_["old_port_session"];return false;}
-      if(port_)dead_ports_.push_back(port_);port_=c.port_session_id;last_rx_seq_=0;last_mono_=0;local_session_=++session_counter_;clock_.clear();system_clock_.clear();
+      if(port_)dead_ports_.push_back(port_);port_=c.port_session_id;last_rx_seq_=0;last_mono_=0;stream_mono_.fill(0);have_ros_offset_=false;local_session_=++session_counter_;clock_.clear();system_clock_.clear();
       for(auto& s:sources_)s.second.stream.clear();
     }
-    if(c.host_monotonic_ns<last_mono_){++errors_["out_of_order_context"];return false;}
-    last_mono_=c.host_monotonic_ns;
+    if(c.host_monotonic_ns<stream_mono_[c.function_mark]){++errors_["out_of_order_context"];return false;}
+    int64_t offset=ns(c.header.stamp)-int64_t(c.host_monotonic_ns);
+    if(have_ros_offset_ && std::abs(double(offset)-double(ros_offset_))>100000000){clock_.clear();system_clock_.clear();local_session_=++session_counter_;++errors_["ros_clock_jump"];}
+    have_ros_offset_=true;ros_offset_=offset;
+    stream_mono_[c.function_mark]=c.host_monotonic_ns;last_mono_=std::max(last_mono_,c.host_monotonic_ns);
     if(!replay_){auto now_mono=steady();if(now_mono<c.host_monotonic_ns || now_mono-c.host_monotonic_ns>1000000000){++errors_["stale_context"];return false;}latency_peak_ns_=std::max(latency_peak_ns_,now_mono-c.host_monotonic_ns);}
     return true;
   }
@@ -140,12 +143,14 @@ class Bridge:public rclcpp::Node {
     session_counter_=std::max(session_counter_,s.session);
     if(!s.packets.accept(p.tx_cycle_seq,p.shard_index,c.host_monotonic_ns)){++errors_["packet_duplicate_or_old"];return;}
     packet_rate_.add(last_mono_);
+    s.last_cycle=p.tx_cycle_seq;s.last_source=p.source_frame_seq;
     auto it=s.cycles.find(p.tx_cycle_seq);
     if(it==s.cycles.end()){
+      ++s.received_cycles;
       if(s.cycles.size()>=32){count_missing(s.cycles.begin()->second);s.cycles.erase(s.cycles.begin());}
       it=s.cycles.emplace(p.tx_cycle_seq,Source::Cycle{p.shard_count,{},last_mono_}).first;
     }
-    if(it->second.expected!=p.shard_count){++errors_["inconsistent_shards"];return;}it->second.shards.set(p.shard_index);
+    if(it->second.expected!=p.shard_count){++errors_["inconsistent_shards"];return;}it->second.shards.set(p.shard_index);if(it->second.shards.count()==it->second.expected)++s.complete_cycles;
     std::vector<Observation> obs;
     for(size_t i=0;i<p.edge_count;++i){const auto& edge=p.edges[i];
       if(!s.observations.accept(p.source_frame_seq,edge.peer_id,c.host_monotonic_ns)){++errors_["observation_duplicate_or_old"];continue;}
@@ -172,12 +177,14 @@ class Bridge:public rclcpp::Node {
     auto add=[&](std::string k,std::string v){diagnostic_msgs::msg::KeyValue kv;kv.key=std::move(k);kv.value=std::move(v);s.values.push_back(kv);};
     add("mode",mode_);add("capacity",std::to_string(capacity_));add("simulator",simulator_?"true":"false");add("network_instance",network_);add("dataset_session",std::to_string(driver_session_));
     for(auto cap:capabilities_)add(cap.first,cap.second?"configured_verified":"false");
-    add("shared_system_clock",shared_?"configured_verified":"false");add("clock_domain",clock_domain_);add("pair_measurement_rate","unknown");add("wire_tx_rate","unknown (MCU log required)");add("radio_loss","unknown (TX log required)");add("degraded","false");
-    add("source_frame_rate_10s",std::to_string(source_rate_.rate(last_mono_,10)));add("source_frame_rate_60s",std::to_string(source_rate_.rate(last_mono_,60)));add("unique_packet_rate_10s",std::to_string(packet_rate_.rate(last_mono_,10)));
-    uint64_t t=last_mono_;if(!replay_)t=steady();
+    add("shared_system_clock",shared_?"configured_verified":"false");add("clock_domain",clock_domain_);add("pair_measurement_rate","unknown");add("wire_tx_rate","unknown (MCU log required)");add("radio_loss","unknown (TX log required)");add("remote_source_frame_rate","unknown (MCU source log required)");add("degraded","false");
+    uint64_t t=replay_?last_mono_:steady();
+    add("source_frame_rate_10s",std::to_string(source_rate_.rate(t,10)));add("source_frame_rate_60s",std::to_string(source_rate_.rate(t,60)));add("unique_packet_rate_10s",std::to_string(packet_rate_.rate(t,10)));
     for(const auto& r:rates_){auto prefix="edge_"+std::to_string(r.first.first)+"_"+std::to_string(r.first.second);add(prefix+"_10s_hz",std::to_string(r.second.rate(t,10)));add(prefix+"_60s_hz",std::to_string(r.second.rate(t,60)));add(prefix+"_stale",t>r.second.last+250000000?"true":"false");}
     size_t pk=0,ob=0,fragments=0,tombs=dead_ports_.size();
-    for(auto& pair:sources_){auto& src=pair.second;pk+=src.packets.keys();ob+=src.observations.keys();fragments+=src.stream.pending();tombs+=src.dead.size();
+    for(auto& pair:sources_){auto& src=pair.second;
+      auto prefix="sender_"+std::to_string(pair.first);add(prefix+"_received_cycles",std::to_string(src.received_cycles));add(prefix+"_complete_cycles",std::to_string(src.complete_cycles));add(prefix+"_last_cycle",std::to_string(src.last_cycle));add(prefix+"_last_source_frame",std::to_string(src.last_source));add(prefix+"_boot",std::to_string(src.boot));
+      pk+=src.packets.keys();ob+=src.observations.keys();fragments+=src.stream.pending();tombs+=src.dead.size();
       for(auto it=src.cycles.begin();it!=src.cycles.end();)if(t>=it->second.time && t-it->second.time>1000000000){count_missing(it->second);it=src.cycles.erase(it);}else ++it;
     }
     add("packet_cache_keys",std::to_string(pk));add("observation_cache_keys",std::to_string(ob));add("fragment_bytes",std::to_string(fragments));add("tombstones",std::to_string(tombs));add("processing_latency_peak_ms",std::to_string(latency_peak_ns_/1e6));
@@ -188,7 +195,7 @@ class Bridge:public rclcpp::Node {
   std::map<std::string,bool> capabilities_;std::map<std::string,uint64_t> errors_;
   std::map<uint8_t,Source> sources_;std::map<std::pair<uint8_t,uint8_t>,Rate> rates_;Rate source_rate_,packet_rate_;
   uint64_t driver_session_{},session_counter_{},local_session_{},batch_seq_{},port_{},last_rx_seq_{},last_mono_{},rx_high_{},latency_peak_ns_{};std::vector<uint64_t> dead_ports_;
-  ClockMapper clock_,system_clock_;
+  bool have_ros_offset_{};int64_t ros_offset_{};std::array<uint64_t,10> stream_mono_{};ClockMapper clock_,system_clock_;
   std::vector<rclcpp::SubscriptionBase::SharedPtr> subs_;rclcpp::Publisher<Batch>::SharedPtr output_;rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_;rclcpp::TimerBase::SharedPtr timer_;
 };

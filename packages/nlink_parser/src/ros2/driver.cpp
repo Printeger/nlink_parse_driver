@@ -16,7 +16,7 @@ class Driver: public rclcpp::Node {
   Driver():Node("linktrack"),framer_(declare_parameter<int>("max_nlink_rx_frame_bytes",8192),declare_parameter<int>("rx_ring_bytes",16384)),
       publisher_(*this,make_qos()) {
     port_=declare_parameter<std::string>("port_name","/dev/ttyUSB0");
-    int baud=declare_parameter<int>("baud_rate",921600);
+    int baud=declare_parameter<int>("baud_rate",921600); baud_=baud;
     int timeout=declare_parameter<int>("serial_timeout_ms",10);
     int reconnect=declare_parameter<int>("reconnect_interval_ms",500);
     chunk_=declare_parameter<int>("max_read_chunk",4096);
@@ -36,9 +36,11 @@ class Driver: public rclcpp::Node {
   }
  private:
   rclcpp::QoS make_qos() { auto q=rclcpp::QoS(100).durability_volatile(); if(declare_parameter<bool>("reliable_qos",false)) q.reliable(); else q.best_effort(); return q; }
-  void frame(const uint8_t* p,size_t n) {
-    context_.function_mark=p[1]; context_.rx_frame_seq=++seq_;
-    try { if(publisher_.publish(p,n,context_)) ++frames_; else ++unpack_errors_; }
+  void frame(const uint8_t* p,size_t n,uint64_t completed) {
+    auto read=std::find_if(read_contexts_.begin(),read_contexts_.end(),[&](const auto& c){return c.host_monotonic_ns==completed;});
+    if(read==read_contexts_.end()){++unpack_errors_;return;}
+    auto frame_context=*read;frame_context.function_mark=p[1];frame_context.rx_frame_seq=++seq_;
+    try { if(publisher_.publish(p,n,frame_context)) ++frames_; else ++unpack_errors_; }
     catch(const std::bad_alloc&) {++unpack_errors_;}
   }
   void tick() {
@@ -46,11 +48,11 @@ class Driver: public rclcpp::Node {
     if(!serial_.isOpen()) {
       if(t<next_open_) return;
       next_open_=t+reconnect_ns_;
-      try {serial_.open(); context_.port_session_id=session(); framer_.clear(); tx_.clear(); ++opens_;}
+      try {serial_.open(); context_.port_session_id=session(); framer_.clear(); read_contexts_.clear();tx_.clear(); ++opens_;}
       catch(const std::exception&) {++open_failures_;return;}
     }
     try {
-      auto cb=[this](const uint8_t* p,size_t n){frame(p,n);};
+      auto cb=[this](const uint8_t* p,size_t n,uint64_t completed){frame(p,n,completed);};
       framer_.expire(t,cb);
       // waitReadable is bounded by configured serial timeout and detects PTY EOF.
       if(serial_.available() || serial_.waitReadable()) {
@@ -59,9 +61,10 @@ class Driver: public rclcpp::Node {
         size_t n=serial_.read(buffer.data(),std::min<size_t>(available?available:1,chunk_));
         auto received_ros=now(); auto received_mono=mono();
         if(!n) throw std::runtime_error("serial EOF");
-        context_.header.stamp=received_ros; context_.host_monotonic_ns=received_mono;
-        bytes_+=n; framer_.feed(buffer.data(),n,received_mono,cb);
+        context_.header.stamp=received_ros; context_.host_monotonic_ns=received_mono;read_contexts_.push_back(context_);
+        bytes_+=n; auto second=received_mono/1000000000;auto bucket=second%60;if(byte_seconds_[bucket]!=second){byte_seconds_[bucket]=second;byte_counts_[bucket]=0;}byte_counts_[bucket]+=n; framer_.feed(buffer.data(),n,received_mono,cb);
       }
+      while(!read_contexts_.empty() && read_contexts_.front().host_monotonic_ns<framer_.oldest_stamp())read_contexts_.pop_front();
       t=mono();
       while(!tx_.empty() && t-tx_.front().first>50000000) {tx_.pop_front();++tx_dropped_;}
       if(!tx_.empty() && t-last_tx_>=25000000) {
@@ -70,21 +73,27 @@ class Driver: public rclcpp::Node {
       }
     } catch(const std::exception&) {
       try {serial_.close();} catch(...) {}
-      framer_.clear();tx_.clear();next_open_=mono()+reconnect_ns_;++disconnects_;
+      framer_.clear();read_contexts_.clear();tx_.clear();next_open_=mono()+reconnect_ns_;++disconnects_;
     }
   }
   void diagnostics() {
     diagnostic_msgs::msg::DiagnosticArray a; a.header.stamp=now();
     diagnostic_msgs::msg::DiagnosticStatus s; s.name="nlink_parser";s.hardware_id=port_;s.level=serial_.isOpen()?0:1;s.message=serial_.isOpen()?"receiving; hardware capabilities unconfirmed":"disconnected";
     auto add=[&](std::string key,auto value){ diagnostic_msgs::msg::KeyValue v;v.key=key;v.value=std::to_string(value);s.values.push_back(v);};
+    auto second=mono()/1000000000;
+    uint64_t short_bytes=0,long_bytes=0;for(size_t i=0;i<60;++i)if(second>=byte_seconds_[i]){auto age=second-byte_seconds_[i];if(age<60)long_bytes+=byte_counts_[i];if(age<10)short_bytes+=byte_counts_[i];}
+    add("rx_bytes_per_s_10s",short_bytes/10.0);add("rx_bytes_per_s_60s",long_bytes/60.0);add("rx_utilization_10s",short_bytes/10.0*10/baud_);
+    if(short_bytes/10.0*10/baud_>0.7){s.level=1;s.message="UART RX utilization above 70 percent";}
     add("rx_bytes",bytes_);add("frames",frames_);add("rx_rejected_bytes",framer_.rejected);add("rx_overflow",framer_.overflow);add("rx_peak_bytes",framer_.peak);add("rx_pending_bytes",framer_.pending());
     add("unpack_errors",unpack_errors_);add("opens",opens_);add("open_failures",open_failures_);add("disconnects",disconnects_);add("tx_dropped",tx_dropped_);add("tx_sent",tx_sent_);add("tx_peak",tx_peak_);
     add("port_session_id",context_.port_session_id);a.status.push_back(s);diagnostics_->publish(a);
   }
   nlink::Framer framer_; nlink::Publisher publisher_; serial::Serial serial_;
+  std::array<uint64_t,60> byte_counts_{},byte_seconds_{};int baud_{};
   std::string port_;size_t chunk_{};bool legacy_{};uint64_t reconnect_ns_{},next_open_{},seq_{},last_tx_{};
   uint64_t bytes_{},frames_{},unpack_errors_{},opens_{},open_failures_{},disconnects_{},tx_dropped_{},tx_sent_{};size_t tx_peak_{};
   nlink_parser::msg::NLinkRxContext context_;
+  std::deque<nlink_parser::msg::NLinkRxContext> read_contexts_;
   std::deque<std::pair<uint64_t,std::string>> tx_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr tx_sub_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_;

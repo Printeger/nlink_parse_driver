@@ -47,7 +47,7 @@ namespace {
 uint32_t u32(const uint8_t* p){return uint32_t(p[0])|uint32_t(p[1])<<8|uint32_t(p[2])<<16|uint32_t(p[3])<<24;}
 int32_t i24(const uint8_t* p){uint32_t v=uint32_t(p[0])|uint32_t(p[1])<<8|uint32_t(p[2])<<16;return v&0x800000?int32_t(v)-0x1000000:int32_t(v);}
 }
-void Receiver::feed(const uint8_t* bytes,size_t length,uint64_t mono_ms){auto cb=[&](const uint8_t* p,size_t n){frame(p,n,mono_ms);};framer_.expire(mono_ms*1000000,cb);framer_.feed(bytes,length,mono_ms*1000000,cb);}
+void Receiver::feed(const uint8_t* bytes,size_t length,uint64_t mono_ms){auto cb=[&](const uint8_t* p,size_t n,uint64_t completed){frame(p,n,completed/1000000);};framer_.expire(mono_ms*1000000,cb);framer_.feed(bytes,length,mono_ms*1000000,cb);}
 void Receiver::frame(const uint8_t* p,size_t,uint64_t now){
  if(p[1]!=4 && p[1]!=5 && p[1]!=8){++ignored_data;return;}
  bool wide=p[1]==8;uint32_t raw=wide?u32(p+5):p[5];auto self=registry_(p[4],raw);if(!self || !self->fixed || self->logical!=reporter_){++bad_identity;return;}
@@ -57,9 +57,11 @@ void Receiver::frame(const uint8_t* p,size_t,uint64_t now){
  else{size_t at=wide?9:6;s.local_ms=u32(p+at);s.system_ms=u32(p+at+4);offset=wide?24:21;count=p[offset-1];stride=wide?10:7;}
  if(have_time_ && s.local_ms-previous_time_>10000){++resets;relay_.device_reset();sequence_=0;}
  have_time_=true;previous_time_=s.local_ms;s.seq=++sequence_;++parsed;
+ std::bitset<256> seen;
  for(size_t i=0;i<count;++i){const auto* n=p+offset+i*stride;auto peer=registry_(n[0],wide?u32(n+1):n[1]);if(!peer || !peer->fixed || peer->logical==reporter_)continue;
   size_t at=wide?5:2;int32_t distance=i24(n+at);if(distance<=0)continue;
-  s.edges[s.count++]={peer->logical,3,distance,n[at+3],n[at+4]};
+  if(seen[peer->logical] || s.count>=s.edges.size()){++bad_identity;continue;}
+  seen.set(peer->logical);s.edges[s.count++]={peer->logical,3,distance,n[at+3],n[at+4]};
  }
  relay_.local_frame(s);
 }

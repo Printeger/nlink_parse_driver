@@ -3,6 +3,7 @@
 #include <iostream>
 using namespace liuo::uwb;
 int main(){
+ bool rejected=false;try{SequenceWindow invalid(0);}catch(const std::invalid_argument&){rejected=true;}assert(rejected);
  SequenceWindow w;
  assert(w.accept(0xfffffffe,1,1));assert(w.accept(0xffffffff,1,2));assert(w.accept(0,1,3));assert(w.accept(1,1,4));
  assert(!w.accept(0,1,5));assert(w.accept(0,2,6));assert(!w.accept(0xffff0000,2,7));

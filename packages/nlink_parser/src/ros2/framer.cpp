@@ -47,28 +47,29 @@ bool validate(const uint8_t* p,size_t n) {
 void Framer::feed(const uint8_t* p,size_t n,uint64_t mono,const Handler& handler) {
   last_byte_=mono;
   for(size_t i=0;i<n;++i) {
-    if(buffer_.size()==capacity_) { buffer_.erase(buffer_.begin()); ++overflow; }
-    buffer_.push_back(p[i]); peak=std::max<uint64_t>(peak,buffer_.size());
-    drain(handler,false);
+    if(buffer_.size()==capacity_) { erase(1); ++overflow; }
+    buffer_.push_back(p[i]);stamps_.push_back(mono); peak=std::max<uint64_t>(peak,buffer_.size());
+    drain(handler,0);
   }
 }
 void Framer::expire(uint64_t mono,const Handler& handler) {
-  if(!buffer_.empty() && mono>=last_byte_ && mono-last_byte_>100000000) drain(handler,true);
+  if(!buffer_.empty() && mono>=stamps_.front() && mono-stamps_.front()>100000000) drain(handler,mono);
 }
-void Framer::drain(const Handler& handler,bool expired) {
+void Framer::drain(const Handler& handler,uint64_t expiry_time) {
   while(buffer_.size()>=2) {
+    bool expired=expiry_time>=stamps_.front() && expiry_time-stamps_.front()>100000000;
     auto* p=buffer_.data(); size_t min=minimum(p[1]);
-    if(p[0]!=0x55 || !min) { buffer_.erase(buffer_.begin()); ++rejected; continue; }
-    if(p[1]>1 && buffer_.size()<4) break;
+    if(p[0]!=0x55 || !min) { erase(1); ++rejected; continue; }
+    if(p[1]>1 && buffer_.size()<4){if(expired){erase(1);++rejected;continue;}break;}
     size_t len=p[1]<2?min:u16(p+2);
     bool bad=len<min || len>maximum_;
     // Fixed-record counts let us reject inconsistent lengths before waiting.
     if(!bad && buffer_.size()>=min-1 && (p[1]==3 || p[1]==4 || p[1]==5 || p[1]==8)) bad=!shape(p,len);
-    if(bad || (expired && buffer_.size()<len)) { buffer_.erase(buffer_.begin()); ++rejected; continue; }
+    if(bad || (expired && buffer_.size()<len)) { erase(1); ++rejected; continue; }
     if(buffer_.size()<len) break;
-    if(!validate(p,len)) { buffer_.erase(buffer_.begin()); ++rejected; continue; }
-    handler(p,len); buffer_.erase(buffer_.begin(),buffer_.begin()+len);
+    if(!validate(p,len)) { erase(1); ++rejected; continue; }
+    handler(p,len,stamps_[len-1]); erase(len);
   }
-  if(expired && buffer_.size()==1) {buffer_.clear(); ++rejected;}
+  if(buffer_.size()==1 && expiry_time>=stamps_.front() && expiry_time-stamps_.front()>100000000) {clear(); ++rejected;}
 }
 }

@@ -1,9 +1,49 @@
-/uwb/n0/nlink_linktrack_nodeframe3_stamped:
+/uwb/n0/nlink_linktrack_nodeframe0:
   reliability: best_effort
   durability: volatile
   history: keep_last
   depth: 100
 /uwb/n0/nlink_linktrack_nodeframe0_stamped:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe2:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe2_stamped:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe3:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe3_stamped:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe5:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe5_stamped:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe6:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 100
+/uwb/n0/nlink_linktrack_nodeframe6_stamped:
   reliability: best_effort
   durability: volatile
   history: keep_last
@@ -14,6 +54,11 @@
   history: keep_last
   depth: 100
 /liuo/uwb/diagnostics:
+  reliability: reliable
+  durability: volatile
+  history: keep_last
+  depth: 10
+/uwb/n0/nlink_diagnostics:
   reliability: reliable
   durability: volatile
   history: keep_last

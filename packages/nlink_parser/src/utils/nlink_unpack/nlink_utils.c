@@ -2,7 +2,8 @@
 
 int32_t NLINK_ParseInt24(nint24_t data) {
   uint8_t *byte = (uint8_t *)(&data);
-  return (int32_t)(byte[0] << 8 | byte[1] << 16 | byte[2] << 24) / 256;
+  uint32_t value = (uint32_t)byte[0] | (uint32_t)byte[1] << 8 | (uint32_t)byte[2] << 16;
+  return (value & 0x800000u) ? (int32_t)value - 0x1000000 : (int32_t)value;
 }
 uint32_t NLINK_ParseUint24(nuint24_t data) {
   uint8_t *byte = (uint8_t *)(&data);
