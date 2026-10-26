@@ -163,8 +163,10 @@ def adapters(out):
 def load(out,seconds):
     h=Harness(out/'load');memory=[];next_memory=0;start=time.monotonic();next_local=start;next_remote=start;seq=0;cycle=0;peers=tuple(range(1,10));sent=Counter();arrivals=[]
     # This subscriber deliberately stalls on a separate executor/process, never the driver.
-    slow=out/'slow.py';slow.write_text('import rospy,time\nfrom liuo_uwb_msgs.msg import UwbObservationBatch\nrospy.init_node("slow_subscriber");s=rospy.Subscriber("/liuo/uwb/observations",UwbObservationBatch,lambda m:time.sleep(.2),queue_size=2,tcp_nodelay=True);rospy.spin()\n')
-    h.start([sys.executable,str(slow)],'slow')
+    slow=out/'slow.py'
+    slow.write_text('import rospy,time,sys\nfrom pathlib import Path\nfrom liuo_uwb_msgs.msg import UwbObservationBatch\ncount=0\npath=Path(sys.argv[1])\ndef receive(m):\n    global count\n    count+=1\n    path.write_text(str(count))\n    time.sleep(.2)\nrospy.init_node("slow_subscriber")\ns=rospy.Subscriber("/liuo/uwb/observations",UwbObservationBatch,receive,queue_size=2,tcp_nodelay=True)\nrospy.spin()\n')
+    slow_count=out/'slow_received.txt'
+    h.start([sys.executable,str(slow),str(slow_count)],'slow')
     h.spin(1); h.messages.clear()
     start=time.monotonic(); next_local=start; next_remote=start
     expected={}; sent_windows=[Counter() for _ in range(int(seconds)//10)]
@@ -209,6 +211,9 @@ def load(out,seconds):
                 k=identity[:2];counts[k]+=1
                 win=expected[identity]
                 if win<len(windows):windows[win][k]+=1
+        assert sent['local_frames']==50*seconds and sent['remote_packets']==30*seconds,dict(sent)
+        slow_received=int(slow_count.read_text())
+        assert 0<slow_received<len(h.messages) and h.procs[-1].poll() is None
         assert set(actual)==set(expected),(len(actual),len(expected))
         assert all(n==1 for n in actual.values()),'duplicate observations'
         for (reporter,peer,seq),win in expected.items():
@@ -222,7 +227,7 @@ def load(out,seconds):
         diag={v.key:v.value for v in h.diags[-1].status[0].values} if h.diags else {}
         assert int(diag.get('packet_cache_keys','10001'))<=10000
         assert int(diag.get('observation_cache_keys','10001'))<=10000
-        return {'status':'PASS','source':'software PTY, no RF','seconds':seconds,'memory_samples':memory,'sent':dict(sent),'expected_observations':len(expected),'received_observations':sum(actual.values()),'per_edge_exact_match':True,'window_basis':'send time; tail drained, no extra input','local_edge_hz':local,'remote_edge_hz':remote,'10s_windows':[{f'{a}->{b}':n/10 for (a,b),n in w.items()} for w in windows],'diagnostics':diag,'driver_diagnostics':{v.key:v.value for v in h.driver_diags[-1].status[0].values} if h.driver_diags else {}}
+        return {'status':'PASS','source':'software PTY, no RF','seconds':seconds,'slow_subscriber_received':slow_received,'memory_samples':memory,'sent':dict(sent),'expected_observations':len(expected),'received_observations':sum(actual.values()),'per_edge_exact_match':True,'window_basis':'send time; tail drained, no extra input','local_edge_hz':local,'remote_edge_hz':remote,'10s_windows':[{f'{a}->{b}':n/10 for (a,b),n in w.items()} for w in windows],'diagnostics':diag,'driver_diagnostics':{v.key:v.value for v in h.driver_diags[-1].status[0].values} if h.driver_diags else {}}
     finally:h.close()
 
 def main():
