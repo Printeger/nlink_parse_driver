@@ -43,7 +43,7 @@ struct Rate {
 }
 class Bridge {
   ros::NodeHandle nh_, private_{"~"};
-  template<class T> T parameter(const std::string& key, const T& value) { T result; private_.param<T>(key,result,value); return result; }
+  template<class T> T parameter(const std::string& key, const T& value) { if(!private_.hasParam(key)) return value; T result; if(!private_.getParam(key,result)) throw std::invalid_argument("invalid parameter type: ~"+key); return result; }
 
  public:
   Bridge():registry_(parameter<std::string>("registry_path","")) {

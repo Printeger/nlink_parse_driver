@@ -3,10 +3,19 @@
 #include <stdexcept>
 #define ARRAY_ASSIGN(DEST,SRC) for(size_t k=0;k<sizeof(SRC)/sizeof(SRC[0]);++k) DEST[k]=SRC[k];
 namespace nlink {
+namespace {
+template<class T> T parameter(ros::NodeHandle& node,const std::string& key,const T& fallback) {
+  if(!node.hasParam(key)) return fallback;
+  T value;
+  if(!node.getParam(key,value)) throw std::invalid_argument("invalid parameter type: ~"+key);
+  return value;
+}
+}
+
 Publisher::Publisher(ros::NodeHandle& node,ros::NodeHandle& private_node) {
-  const int range=private_node.param<int>("range_frame",3);
-  const int data=private_node.param<int>("data_frame",0);
-  const bool debug=private_node.param<bool>("publish_debug_topics",false);
+  const int range=parameter<int>(private_node,"range_frame",3);
+  const int data=parameter<int>(private_node,"data_frame",0);
+  const bool debug=parameter<bool>(private_node,"publish_debug_topics",false);
   if(range!=2 && range!=3 && range!=5)
     throw std::invalid_argument("range_frame must be 2/3/5");
   if(data!=0 && data!=6)

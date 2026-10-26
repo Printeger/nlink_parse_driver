@@ -58,8 +58,19 @@ for label,change in [
     assert result.returncode!=0,(label,result.stdout)
     report[label]='rejected'
 for key,value in [('range_frame',4),('data_frame',3)]:
+    if rospy.has_param('/linktrack'):rospy.delete_param('/linktrack')
     result=subprocess.run(['rosrun','nlink_parser','linktrack',f'_{key}:={value}'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=8)
     assert result.returncode!=0
     report[key]='invalid rejected'
-report['status']='PASS'
+for package,node,key in [('nlink_parser','linktrack','range_frame'),
+                         ('nlink_parser','linktrack','baud_rate'),
+                         ('liuo_uwb_bridge','range_bridge','dedup_max_entries')]:
+    namespace='/linktrack' if package=='nlink_parser' else '/liuo_uwb_bridge'
+    if rospy.has_param(namespace):rospy.delete_param(namespace)
+    cmd=['rosrun',package,node,f'_{key}:=invalid',
+         '_registry_path:='+str(root/'packages/liuo_uwb_bridge/config/registry.yaml')]
+    result=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=8)
+    assert result.returncode!=0 and f'invalid parameter type: ~{key}' in result.stdout,result.stdout
+    report[key+'_type']='rejected'
+report['status']='PASS' 
 (out/'report.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))

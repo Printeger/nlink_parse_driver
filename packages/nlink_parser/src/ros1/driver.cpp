@@ -13,7 +13,7 @@ uint64_t session() { std::random_device rd; return (uint64_t(rd())<<32 | rd()) |
 }
 class Driver {
   ros::NodeHandle nh_, private_{"~"};
-  template<class T> T parameter(const std::string& key, const T& value) { T result; private_.param<T>(key,result,value); return result; }
+  template<class T> T parameter(const std::string& key, const T& value) { if(!private_.hasParam(key)) return value; T result; if(!private_.getParam(key,result)) throw std::invalid_argument("invalid parameter type: ~"+key); return result; }
 
  public:
   Driver():framer_(parameter<int>("max_nlink_rx_frame_bytes",8192),parameter<int>("rx_ring_bytes",16384)),
