@@ -4,7 +4,7 @@ import argparse,json,os,signal,subprocess
 from pathlib import Path
 import rospy,rosbag
 from std_srvs.srv import Trigger
-from pty_bridge_test import Harness,range_frame,root
+from pty_bridge_test import Harness,range_frame,data_frame,packet,encode,root
 
 def stop(p):
     if p.poll() is None:
@@ -24,18 +24,21 @@ try:
     assert rospy.get_param('/liuo_uwb_bridge/registry_path')==str(h.registry)
     bag=out/'recorded.bag'
     h.start([str(root/'tools/record.sh'),str(bag)],'record');recorder=h.procs[-1];h.spin(2)
-    for i in range(20):h.send(range_frame(i+1));h.spin(.02)
+    for i in range(20):
+        h.send(range_frame(i+1)+data_frame([(1,encode(packet(seq=i+1,cycle=i+1)),0)]));h.spin(.02)
     h.spin(.5);stop(recorder)
     topic='/uwb/n0/nlink_linktrack_nodeframe3_stamped'
+    remote_topic='/uwb/n0/nlink_linktrack_nodeframe0_stamped'
     with rosbag.Bag(str(bag)) as reader:
         frames=list(reader.read_messages(topics=[topic]))
+        remote_frames=list(reader.read_messages(topics=[remote_topic]))
         original=list(reader.read_messages(topics=['/liuo/uwb/observations']))
-    assert len(frames)==20 and len(original)==20,(len(frames),len(original))
+    assert len(frames)==20 and len(remote_frames)==20 and len(original)==40,(len(frames),len(original))
     for proc in h.procs:stop(proc)
     h.messages.clear();h.spin(.3)
     h.start(['rosbag','play',str(bag),'--wait-for-subscribers','--delay','1','--topics','/liuo/uwb/observations'],'direct')
     h.procs[-1].wait(timeout=15);h.spin(.5)
-    assert len(h.messages)==20,len(h.messages)
+    assert len(h.messages)==40,len(h.messages)
     assert [m.batch_seq for _,m in h.messages]==[m.batch_seq for _,m,_ in original]
     h.start(['rosrun','liuo_uwb_bridge','range_bridge',f'_registry_path:={h.registry}','_replay_mode:=true'],'replay_bridge');h.spin(1)
     reset=rospy.ServiceProxy('/liuo_uwb_bridge/reset_replay',Trigger)
@@ -44,13 +47,16 @@ try:
         if run:assert reset().success
         h.messages.clear()
         # Third pass seeks into the bag, with an explicit fresh dataset reset.
-        cmd=['rosbag','play',str(bag),'--wait-for-subscribers','--delay','1','--topics',topic]
+        cmd=['rosbag','play',str(bag),'--wait-for-subscribers','--delay','1','--topics',topic,remote_topic]
         if run==2:cmd+=['--start','0.1']
         h.start(cmd,f'play-{run}');h.procs[-1].wait(timeout=15);h.spin(.5)
-        actual=[m.observations[0].received_stamp.to_nsec() for _,m in h.messages]
-        recorded=[m.context.header.stamp.to_nsec() for _,m,_ in frames]
-        if run<2:assert actual==recorded,(len(actual),len(recorded))
-        else:assert actual and actual==recorded[-len(actual):]
+        recorded={0:[m.context.header.stamp.to_nsec() for _,m,_ in frames],
+                  1:[m.context.header.stamp.to_nsec() for _,m,_ in remote_frames]}
+        actual={kind:[m.observations[0].received_stamp.to_nsec() for _,m in h.messages
+                      if m.observations[0].kind==kind] for kind in [0,1]}
+        for kind in [0,1]:
+            if run<2:assert actual[kind]==recorded[kind],(kind,len(actual[kind]),len(recorded[kind]))
+            else:assert actual[kind] and actual[kind]==recorded[kind][-len(actual[kind]):]
         epochs.append(h.messages[0][1].driver_session_id)
         assert h.node.count_publishers('/liuo/uwb/observations')==1
     assert len(set(epochs))==3
@@ -60,19 +66,20 @@ try:
     h.spin(1);h.messages.clear()
     pause_log=(out/'paused-play.log').open('w');h.logs.append(pause_log)
     paused=subprocess.Popen(['rosbag','play',str(bag),'--clock','--pause','--rate','0.2',
-                             '--wait-for-subscribers','--delay','1','--topics',topic],
+                             '--wait-for-subscribers','--delay','1','--topics',topic,remote_topic],
                             stdin=subprocess.PIPE,stdout=pause_log,stderr=pause_log,start_new_session=True)
     h.procs.append(paused);h.spin(1.5)
     assert not h.messages
     paused.stdin.write(b' ');paused.stdin.flush();h.spin(.35)
     paused.stdin.write(b' ');paused.stdin.flush();h.spin(.15)
     before=len(h.messages);diagnostics_before=len(h.diags);h.spin(1.2)
-    assert 0<before<20 and len(h.messages)==before,(before,len(h.messages))
+    assert 0<before<40 and len(h.messages)==before,(before,len(h.messages))
     assert len(h.diags)>diagnostics_before,'steady diagnostics stalled with /clock'
     paused.stdin.write(b' ');paused.stdin.flush();paused.wait(timeout=15);h.spin(.5)
-    assert [m.observations[0].received_stamp.to_nsec() for _,m in h.messages]==recorded
+    for kind in [0,1]:
+        assert [m.observations[0].received_stamp.to_nsec() for _,m in h.messages if m.observations[0].kind==kind]==recorded[kind]
     assert h.node.count_publishers('/liuo/uwb/observations')==1
-    report=dict(clock_pause_resume=True,paused_diagnostics=True,status='PASS',launch_baud=460800,recorded_stamped=20,direct_observations=20,
+    report=dict(clock_pause_resume=True,paused_diagnostics=True,status='PASS',launch_baud=460800,recorded_range_stamped=20,recorded_data_stamped=20,direct_observations=40,
                 replay_passes=2,seek_reset=True,received_times_preserved=True,dataset_sessions=epochs,bag=str(bag))
     (out/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))
 finally:

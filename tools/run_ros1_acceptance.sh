@@ -28,7 +28,7 @@ PY
  cmake --version
  g++ --version
 } > "$out/environment.txt"
-for test in pty_driver_test legacy_tx_test pty_bridge_test state_integration_test topic_visibility_test ros1_contract_test bag_smoke; do
+for test in pty_driver_test legacy_tx_test pty_bridge_test state_integration_test topic_visibility_test ros1_contract_test bag_smoke ros1_cli_smoke; do
  echo "Running $test"
  python3 "$root/tools/$test.py" --output "$out/$test" > "$out/$test.log" 2>&1
 done

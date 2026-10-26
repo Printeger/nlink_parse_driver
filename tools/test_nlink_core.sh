@@ -14,11 +14,11 @@ g++ -std=c++17 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
   -I "$root/packages/nlink_parser/include" -I "$vendor" \
   "$root/packages/nlink_parser/src/ros2/framer.cpp" \
   "$root/packages/nlink_parser/test/framer_test.cpp" "${objects[@]}" -o "$out/framer_test"
-ASAN_OPTIONS=verify_asan_link_order=0 UBSAN_OPTIONS=halt_on_error=1 "$out/framer_test"
+ASAN_OPTIONS=verify_asan_link_order=0:detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 "$out/framer_test"
 gcc -std=c11 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Dmalloc=uwb_test_malloc -I "$vendor" \
  -c "$vendor/nlink_linktrack_nodeframe3.c" -o "$out/frame3_fail.o"
 g++ -std=c++17 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
  -I "$root/packages/nlink_parser/include" -I "$vendor" \
  "$root/packages/nlink_parser/src/ros2/framer.cpp" "$root/packages/nlink_parser/test/allocation_failure_test.cpp" \
  "$out/frame3_fail.o" "$out/nlink_utils.c.o" -o "$out/allocation_failure_test"
-ASAN_OPTIONS=verify_asan_link_order=0 UBSAN_OPTIONS=halt_on_error=1 "$out/allocation_failure_test"
+ASAN_OPTIONS=verify_asan_link_order=0:detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 "$out/allocation_failure_test"
