@@ -11,3 +11,5 @@ D1–D4：四包原生 catkin、roscpp 适配，保持 framer 路径与 standalo
 D5：保留全部原始164字段断言，ROS1 Header.seq 单独归一化。PTY 故障、模式组合和话题选择测试通过。旧固定15ms检查在主机负载下偶发抢先断言，改为有界等待目标计数，不更改观测结果要求。bag 首次未等待连接丢开头帧，改为 `--wait-for-subscribers --delay 1`，两次完整回放与 seek 验证通过。
 
 验收状态以 `ros1_software_acceptance.md` 的最终逐项证据为准；本日志不将未执行项视为通过。所有输入为合成数据，不是无线验收。
+
+最终补充：暂停ROS时间使映射失效的回归已通过；测试参数残留用专用master内清理本任务节点私有参数隔离。最终双路bag覆盖40条原观测、两次重播与seek/reset、/clock暂停恢复。`final-suite-r2`全部通过，slow消费者实际301批，34,200条逐边身份完整。独立空install构建及安装消费者/launch/录包通过。ASan/UBSan关闭LeakSanitizer退出扫描后通过，不宣称泄漏检查通过。相邻3017文件哈希和ROS2引用一致。最终证据及交付核验见验收报告。
