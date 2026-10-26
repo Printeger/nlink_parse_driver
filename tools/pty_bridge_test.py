@@ -68,7 +68,7 @@ class Harness:
         if lp:rows=rows[:2]+[f'  - {{system_id: 0, operating_mode: LP, raw_role: 1, raw_id: {i}, logical_id: {i+1}, is_fixed: true}}' for i in range(1,19)]
         self.registry.write_text('nodes:\n'+'\n'.join(rows)+'\n')
         self.procs=[];self.logs=[]
-        self.start(['ros2','run','nlink_parser','linktrack','--ros-args','-r','__ns:=/uwb/n0','-p',f'port_name:={self.port}'],'driver')
+        self.start(['ros2','run','nlink_parser','linktrack','--ros-args','-r','__ns:=/uwb/n0','-p',f'port_name:={self.port}','-p',f'range_frame:={frame}','-p',f'data_frame:={data}'],'driver')
         self.start(['ros2','run','liuo_uwb_bridge','range_bridge','--ros-args','-p',f'registry_path:={self.registry}','-p',f'operating_mode:={mode}','-p',f'range_frame:={frame}','-p',f'data_frame:={data}','-p','simulator:=true','-p',f'dedup_max_entries:={keys}','-p',f'shared_system_clock:={str(shared).lower()}','-p','clock_domain:=test_clock'],'bridge')
         self.spin(2)
     def receive(self,m):self.messages.append((time.monotonic(),m))

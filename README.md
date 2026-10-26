@@ -43,6 +43,8 @@ data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/u
 
 launch还提供`config:=/绝对路径/uwb.yaml`与`registry:=/绝对路径/registry.yaml`。选择range_frame=2/3/5及data_frame=0/6，默认3/0，不能同时开所有测距流制造重复。设备local_time现为毫秒，不是导入版本写入的Unix微秒。
 
+默认 `publish_debug_topics: false`，驱动只创建所选测距帧和数传帧的 `_stamped` 话题。默认业务话题为 `/uwb/n0/nlink_linktrack_nodeframe3_stamped`、`/uwb/n0/nlink_linktrack_nodeframe0_stamped`、`/liuo/uwb/observations`，另保留两路诊断和 ROS 系统话题。LIUO 使用 observations。其余原始/未选中的话题不创建、不发布；所有帧解析能力保留。排查其他协议帧或兼容旧订阅者时，将配置中的 `publish_debug_topics` 设为 `true` 并重启，可恢复全部原始和 stamped 话题。直接运行驱动时可传 `--ros-args -p publish_debug_topics:=true`。这些参数在启动时读取。
+
 ## 录包与回放
 
 ```bash

@@ -8,7 +8,7 @@ from pathlib import Path
 
 def generate_launch_description():
     share=Path(get_package_share_directory('liuo_uwb_bridge'))
-    defaults={'port':'/dev/ttyUSB0','baud':'921600','config':str(share/'config/uwb.yaml'),
+    defaults={'port':'/dev/ttyACM0','baud':'921600','config':str(share/'config/uwb.yaml'),
               'registry':str(share/'config/registry.yaml'),'namespace':'/uwb/n0','use_sim_time':'false'}
     declarations=[DeclareLaunchArgument(k,default_value=v) for k,v in defaults.items()]
     cfg=LaunchConfiguration('config')

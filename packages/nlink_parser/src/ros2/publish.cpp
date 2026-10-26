@@ -1,26 +1,44 @@
 #include "publisher.hpp"
 #include <cstring>
+#include <stdexcept>
 #define ARRAY_ASSIGN(DEST,SRC) for(size_t k=0;k<sizeof(SRC)/sizeof(SRC[0]);++k) DEST[k]=SRC[k];
 namespace nlink {
 Publisher::Publisher(rclcpp::Node& node,const rclcpp::QoS& qos) {
-pub_anchorframe0=node.create_publisher<nlink_parser::msg::LinktrackAnchorframe0>("nlink_linktrack_anchorframe0",qos);
-pub_tagframe0=node.create_publisher<nlink_parser::msg::LinktrackTagframe0>("nlink_linktrack_tagframe0",qos);
-pub_nodeframe0=node.create_publisher<nlink_parser::msg::LinktrackNodeframe0>("nlink_linktrack_nodeframe0",qos);
-stamped_nodeframe0=node.create_publisher<nlink_parser::msg::LinktrackNodeframe0Stamped>("nlink_linktrack_nodeframe0_stamped",qos);
-pub_nodeframe1=node.create_publisher<nlink_parser::msg::LinktrackNodeframe1>("nlink_linktrack_nodeframe1",qos);
-pub_nodeframe2=node.create_publisher<nlink_parser::msg::LinktrackNodeframe2>("nlink_linktrack_nodeframe2",qos);
-stamped_nodeframe2=node.create_publisher<nlink_parser::msg::LinktrackNodeframe2Stamped>("nlink_linktrack_nodeframe2_stamped",qos);
-pub_nodeframe3=node.create_publisher<nlink_parser::msg::LinktrackNodeframe3>("nlink_linktrack_nodeframe3",qos);
-stamped_nodeframe3=node.create_publisher<nlink_parser::msg::LinktrackNodeframe3Stamped>("nlink_linktrack_nodeframe3_stamped",qos);
-pub_nodeframe4=node.create_publisher<nlink_parser::msg::LinktrackNodeframe4>("nlink_linktrack_nodeframe4",qos);
-pub_nodeframe5=node.create_publisher<nlink_parser::msg::LinktrackNodeframe5>("nlink_linktrack_nodeframe5",qos);
-stamped_nodeframe5=node.create_publisher<nlink_parser::msg::LinktrackNodeframe5Stamped>("nlink_linktrack_nodeframe5_stamped",qos);
-pub_nodeframe6=node.create_publisher<nlink_parser::msg::LinktrackNodeframe6>("nlink_linktrack_nodeframe6",qos);
-stamped_nodeframe6=node.create_publisher<nlink_parser::msg::LinktrackNodeframe6Stamped>("nlink_linktrack_nodeframe6_stamped",qos);
+  const int range=node.declare_parameter<int>("range_frame",3);
+  const int data=node.declare_parameter<int>("data_frame",0);
+  const bool debug=node.declare_parameter<bool>("publish_debug_topics",false);
+  if(range!=2 && range!=3 && range!=5)
+    throw std::invalid_argument("range_frame must be 2/3/5");
+  if(data!=0 && data!=6)
+    throw std::invalid_argument("data_frame must be 0/6");
+
+  // Raw outputs and unselected stamped streams are opt-in diagnostics.
+  if(debug) {
+    pub_anchorframe0=node.create_publisher<nlink_parser::msg::LinktrackAnchorframe0>("nlink_linktrack_anchorframe0",qos);
+    pub_tagframe0=node.create_publisher<nlink_parser::msg::LinktrackTagframe0>("nlink_linktrack_tagframe0",qos);
+    pub_nodeframe0=node.create_publisher<nlink_parser::msg::LinktrackNodeframe0>("nlink_linktrack_nodeframe0",qos);
+    pub_nodeframe1=node.create_publisher<nlink_parser::msg::LinktrackNodeframe1>("nlink_linktrack_nodeframe1",qos);
+    pub_nodeframe2=node.create_publisher<nlink_parser::msg::LinktrackNodeframe2>("nlink_linktrack_nodeframe2",qos);
+    pub_nodeframe3=node.create_publisher<nlink_parser::msg::LinktrackNodeframe3>("nlink_linktrack_nodeframe3",qos);
+    pub_nodeframe4=node.create_publisher<nlink_parser::msg::LinktrackNodeframe4>("nlink_linktrack_nodeframe4",qos);
+    pub_nodeframe5=node.create_publisher<nlink_parser::msg::LinktrackNodeframe5>("nlink_linktrack_nodeframe5",qos);
+    pub_nodeframe6=node.create_publisher<nlink_parser::msg::LinktrackNodeframe6>("nlink_linktrack_nodeframe6",qos);
+  }
+  if(debug || data==0)
+    stamped_nodeframe0=node.create_publisher<nlink_parser::msg::LinktrackNodeframe0Stamped>("nlink_linktrack_nodeframe0_stamped",qos);
+  if(debug || range==2)
+    stamped_nodeframe2=node.create_publisher<nlink_parser::msg::LinktrackNodeframe2Stamped>("nlink_linktrack_nodeframe2_stamped",qos);
+  if(debug || range==3)
+    stamped_nodeframe3=node.create_publisher<nlink_parser::msg::LinktrackNodeframe3Stamped>("nlink_linktrack_nodeframe3_stamped",qos);
+  if(debug || range==5)
+    stamped_nodeframe5=node.create_publisher<nlink_parser::msg::LinktrackNodeframe5Stamped>("nlink_linktrack_nodeframe5_stamped",qos);
+  if(debug || data==6)
+    stamped_nodeframe6=node.create_publisher<nlink_parser::msg::LinktrackNodeframe6Stamped>("nlink_linktrack_nodeframe6_stamped",qos);
 }
 bool Publisher::publish(const uint8_t* bytes,size_t length,const nlink_parser::msg::NLinkRxContext& context) { switch(bytes[1]) {
 case 0: {
  if(!nlt_anchorframe0_.UnpackData(bytes,length)) return false;
+ if(!(pub_anchorframe0)) return true;
  nlink_parser::msg::LinktrackAnchorframe0 msg_data;
     auto data = nlt_anchorframe0_.result;
     msg_data.role = data.role;
@@ -39,10 +57,11 @@ case 0: {
       ARRAY_ASSIGN(msg_node.dis_arr, node->dis_arr)
       msg_nodes.push_back(msg_node);
     }
- pub_anchorframe0->publish(msg_data);
+ if(pub_anchorframe0) pub_anchorframe0->publish(msg_data);
  return true; }
 case 1: {
  if(!g_nlt_tagframe0.UnpackData(bytes,length)) return false;
+ if(!(pub_tagframe0)) return true;
  nlink_parser::msg::LinktrackTagframe0 msg_data;
     const auto &data = g_nlt_tagframe0.result;
 
@@ -61,10 +80,11 @@ case 1: {
     ARRAY_ASSIGN(msg_data.angle_3d, data.angle_3d)
     ARRAY_ASSIGN(msg_data.quaternion, data.quaternion)
 
- pub_tagframe0->publish(msg_data);
+ if(pub_tagframe0) pub_tagframe0->publish(msg_data);
  return true; }
 case 2: {
  if(!g_nlt_nodeframe0.UnpackData(bytes,length)) return false;
+ if(!(pub_nodeframe0 || stamped_nodeframe0)) return true;
  nlink_parser::msg::LinktrackNodeframe0 msg_data;
     const auto &data = g_nlt_nodeframe0.result;
 
@@ -83,11 +103,12 @@ case 2: {
       memcpy(msg_node.data.data(), node->data, node->data_length);
     }
 
- pub_nodeframe0->publish(msg_data);
- nlink_parser::msg::LinktrackNodeframe0Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe0->publish(stamped);
+ if(pub_nodeframe0) pub_nodeframe0->publish(msg_data);
+ if(stamped_nodeframe0) { nlink_parser::msg::LinktrackNodeframe0Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe0->publish(stamped); }
  return true; }
 case 3: {
  if(!g_nlt_nodeframe1.UnpackData(bytes,length)) return false;
+ if(!(pub_nodeframe1)) return true;
  nlink_parser::msg::LinktrackNodeframe1 msg_data;
     const auto &data = g_nlt_nodeframe1.result;
 
@@ -109,10 +130,11 @@ case 3: {
       ARRAY_ASSIGN(msg_node.pos_3d, node->pos_3d)
     }
 
- pub_nodeframe1->publish(msg_data);
+ if(pub_nodeframe1) pub_nodeframe1->publish(msg_data);
  return true; }
 case 4: {
  if(!g_nlt_nodeframe2.UnpackData(bytes,length)) return false;
+ if(!(pub_nodeframe2 || stamped_nodeframe2)) return true;
  nlink_parser::msg::LinktrackNodeframe2 msg_data;
     const auto &data = g_nlt_nodeframe2.result;
 
@@ -143,11 +165,12 @@ case 4: {
       msg_node.rx_rssi = node->rx_rssi;
     }
 
- pub_nodeframe2->publish(msg_data);
- nlink_parser::msg::LinktrackNodeframe2Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe2->publish(stamped);
+ if(pub_nodeframe2) pub_nodeframe2->publish(msg_data);
+ if(stamped_nodeframe2) { nlink_parser::msg::LinktrackNodeframe2Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe2->publish(stamped); }
  return true; }
 case 5: {
  if(!g_nlt_nodeframe3.UnpackData(bytes,length)) return false;
+ if(!(pub_nodeframe3 || stamped_nodeframe3)) return true;
  nlink_parser::msg::LinktrackNodeframe3 msg_data;
     const auto &data = g_nlt_nodeframe3.result;
 
@@ -172,11 +195,12 @@ case 5: {
       msg_node.rx_rssi = node->rx_rssi;
     }
 
- pub_nodeframe3->publish(msg_data);
- nlink_parser::msg::LinktrackNodeframe3Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe3->publish(stamped);
+ if(pub_nodeframe3) pub_nodeframe3->publish(msg_data);
+ if(stamped_nodeframe3) { nlink_parser::msg::LinktrackNodeframe3Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe3->publish(stamped); }
  return true; }
 case 6: {
  if(!g_nlt_nodeframe4.UnpackData(bytes,length)) return false;
+ if(!(pub_nodeframe4)) return true;
  nlink_parser::msg::LinktrackNodeframe4 msg_data;
     const auto &data = g_nlt_nodeframe4.result;
 
@@ -200,10 +224,11 @@ case 6: {
       }
     }
 
- pub_nodeframe4->publish(msg_data);
+ if(pub_nodeframe4) pub_nodeframe4->publish(msg_data);
  return true; }
 case 8: {
  if(!g_nlt_nodeframe5.UnpackData(bytes,length)) return false;
+ if(!(pub_nodeframe5 || stamped_nodeframe5)) return true;
  nlink_parser::msg::LinktrackNodeframe5 msg_data;
     const auto &data = g_nlt_nodeframe5.result;
 
@@ -227,11 +252,12 @@ case 8: {
       msg_node.rx_rssi = node->rx_rssi;
     }
 
- pub_nodeframe5->publish(msg_data);
- nlink_parser::msg::LinktrackNodeframe5Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe5->publish(stamped);
+ if(pub_nodeframe5) pub_nodeframe5->publish(msg_data);
+ if(stamped_nodeframe5) { nlink_parser::msg::LinktrackNodeframe5Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe5->publish(stamped); }
  return true; }
 case 9: {
  if(!g_nlt_nodeframe6.UnpackData(bytes,length)) return false;
+ if(!(pub_nodeframe6 || stamped_nodeframe6)) return true;
  nlink_parser::msg::LinktrackNodeframe6 msg_data;
     const auto &data = g_nlt_nodeframe6.result;
 
@@ -250,8 +276,8 @@ case 9: {
       memcpy(msg_node.data.data(), node->data, node->data_length);
     }
 
- pub_nodeframe6->publish(msg_data);
- nlink_parser::msg::LinktrackNodeframe6Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe6->publish(stamped);
+ if(pub_nodeframe6) pub_nodeframe6->publish(msg_data);
+ if(stamped_nodeframe6) { nlink_parser::msg::LinktrackNodeframe6Stamped stamped; stamped.context=context; stamped.frame=msg_data; stamped_nodeframe6->publish(stamped); }
  return true; }
 default:return false; } }
 }

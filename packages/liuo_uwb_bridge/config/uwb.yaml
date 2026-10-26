@@ -7,6 +7,8 @@
     simulator: false
     range_frame: 3
     data_frame: 0
+    # Only publish the selected stamped inputs; enable all raw/stamped topics for debugging.
+    publish_debug_topics: false
     input_namespace: /uwb/n0
     shared_system_clock: false
     clock_domain: ""

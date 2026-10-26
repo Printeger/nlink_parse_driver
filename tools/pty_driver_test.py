@@ -35,7 +35,7 @@ def wait_count(name,n):
     assert len(received[name])==n,(name,n,len(received[name]))
 master,slave=pty.openpty();port=os.ttyname(slave)
 log=(out/'driver.log').open('w')
-proc=subprocess.Popen(['ros2','run','nlink_parser','linktrack','--ros-args','-r','__ns:=/test','-p',f'port_name:={port}'],stdout=log,stderr=log,start_new_session=True)
+proc=subprocess.Popen(['ros2','run','nlink_parser','linktrack','--ros-args','-r','__ns:=/test','-p',f'port_name:={port}','-p','publish_debug_topics:=true'],stdout=log,stderr=log,start_new_session=True)
 try:
     spin(2)
     for wire in fixtures:os.write(master,wire);spin(0.1)

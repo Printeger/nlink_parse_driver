@@ -1,6 +1,7 @@
-# EXAMPLE identities only; replace with verified deployment registry.
+# Robot: observed raw_role=0/raw_id=19 maps to logical N0.
+# Remaining fixed-node entries are example identities; verify for deployment.
 nodes:
-  - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 0, logical_id: 0, is_fixed: false}
+  - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 19, logical_id: 0, is_fixed: false}
   - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 1, logical_id: 1, is_fixed: true}
   - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 2, logical_id: 2, is_fixed: true}
   - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 3, logical_id: 3, is_fixed: true}
@@ -19,4 +20,3 @@ nodes:
   - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 16, logical_id: 16, is_fixed: true}
   - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 17, logical_id: 17, is_fixed: true}
   - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 18, logical_id: 18, is_fixed: true}
-  - {system_id: 0, operating_mode: unconfirmed, raw_role: 0, raw_id: 19, logical_id: 19, is_fixed: true}
