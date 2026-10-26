@@ -2,6 +2,8 @@
 
 目标平台 Ubuntu 24.04 / ROS 2 Jazzy。单串口所有者 `nlink_parser/linktrack` 发布原始 LinkTrack 帧及接收 context，独立 `liuo_uwb_bridge/range_bridge` 即时输出 `/liuo/uwb/observations`。平台无关 MCU 逻辑每200ms冻结单一源帧并发完整分包轮次。
 
+新增消息的功能、字段格式、时间语义、Python 订阅示例及实际效果见 [UWB 观测消息 README](packages/liuo_uwb_msgs/README.md)。
+
 软件验收状态与证据见 [验收报告](docs/software_acceptance.md)。**没有实机无线、板级烧录或 LIUO 融合验收**；模拟≥20Hz不证明真实TWR频率。默认硬件能力false、模式unconfirmed、capacity=0、legacy TX与降级关闭。
 
 规范：[handbook](docs/uwb_driver_design_notebook.md)、[ROS2需求](docs/uwb_ros2_development_requirements.md)。接口兼容性见 [ROS2迁移说明](docs/ros2_migration.md)，时间/会话与消费者要求见 [LIUO接入合同](docs/liuo_integration_contract.md)，MCU见 [HAL与模拟说明](firmware/anchor_relay/README.md)。原ROS1说明保留在docs/README.ros1.*，不能按其中catkin/submodule命令构建当前版本。
