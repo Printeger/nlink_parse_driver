@@ -72,5 +72,5 @@ for package,node,key in [('nlink_parser','linktrack','range_frame'),
     result=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=8)
     assert result.returncode!=0 and f'invalid parameter type: ~{key}' in result.stdout,result.stdout
     report[key+'_type']='rejected'
-report['status']='PASS' 
+report['status']='PASS'
 (out/'report.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))

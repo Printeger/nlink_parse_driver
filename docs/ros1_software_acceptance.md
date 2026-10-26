@@ -2,7 +2,7 @@
 
 日期：2026-10-26（Asia/Shanghai）。当前仓库 `/home/mint/ws_calib/src/nlink_parse_driver`，分支 `feat/uwb-ros1-relay-v1`。**必需软件验证通过，真实无线/板级/LIUO 融合未完成。** 最终提交及远端同名分支 SHA 核验保存于 [delivery.json](/home/mint/ws_calib/evidence/uwb_ros1/delivery.json)，与本报告一起用于判断 Git 交付完成；不能以软件测试替代推送核验。
 
-固定基线 `a13dc6dc26ff7fed11272c2ec9a9f29020805b9a`。运行时代码提交 `bb7a550c3287dd1911788ae44abdc573678c17a6`，最终测试提交 `6fd1efd`，之后仅文档提交。完整源文件哈希、执行时版本差异说明见 [tested-source.json](/home/mint/ws_calib/evidence/uwb_ros1/tested-source.json)。没有 ROS2 双版本运行环境；对照使用冻结字节夹具和独立协议参考，不宣称运行过双版本对比。
+固定基线 `a13dc6dc26ff7fed11272c2ec9a9f29020805b9a`。主要运行时代码提交 `bb7a550c3287dd1911788ae44abdc573678c17a6`；参数类型严格拒绝补丁为 `2e4937b`，通过 `strict-params.log`、`strict-topics.log`、`strict-install-build.log` 与 `strict-install-cli.log`。最终测试提交 `6fd1efd`（之后补充参数类型回归），最终文档提交不改变运行行为。完整源文件哈希、执行时版本差异说明见 [tested-source.json](/home/mint/ws_calib/evidence/uwb_ros1/tested-source.json)。没有 ROS2 双版本运行环境；对照使用冻结字节夹具和独立协议参考，不宣称运行过双版本对比。
 
 ## 环境与证据
 
@@ -25,7 +25,7 @@ Ubuntu20.04.6、ROS Noetic、Python3.8.10、GCC9.4、CMake3.16.3；实际依赖�
 | S8 60秒负载 | 通过 | `final-suite-r2/pty_bridge_test/report.json` load、`load-summary.json`：每条边精确对照发送身份，6个10秒窗口、独立慢订阅者、队列/内存/延迟；详细结果如下 |
 | S9 rosbag | 通过 | `final-suite-r2/bag_smoke/report.json`、`install-bag-both/report.json`：实录20测距+20数传stamped、40原observations；直接播放、两次重播、seek/reset、/clock暂停恢复、诊断不阻塞、接收时间保留/新数据集、唯一观测发布者 |
 | S10 standalone/MCU | 通过 | `core-final.log`、`state-standalone.log`、`mcu-release.log`、`mcu-sanitizer-final.log`：无ROS编译framer/state/codec/relay；8边每秒10包和18边20包，完整5Hz轮次，冻结源/过期/迟到/过载/短写/无回环 |
-| S11 文档/命令/Git | 操作通过，Git核验见交付记录 | `cli-smoke/report.json`：已安装reader、echo/hz、33种消息定义/MD5；README、迁移、合同、任务副本已交付；最终push与SHA核验在 `delivery.json`、`push.log` |
+| S11 文档/命令/Git | 通过（最终SHA见交付记录） | `cli-smoke/report.json`：已安装reader、echo/hz、33种消息定义/MD5；README、迁移、合同、任务副本已交付；最终push与SHA核验在 `delivery.json`、`push.log` |
 
 D0–D7 对应上述矩阵：D0→S0，D1→S1，D2→S2/S5，D3→S3/S4/S6，D4→S7，D5→S8/S9，D6→S10及文档，D7→S11和最终保护核验。当前两份任务文档与 `/home/mint/ws_calib/docs/` 外部原件逐字节一致。
 
@@ -54,6 +54,8 @@ D0–D7 对应上述矩阵：D0→S0，D1→S1，D2→S2/S5，D3→S3/S4/S6，D4
 - 首次bag未等待订阅连接丢开头两条，工具统一加 `--wait-for-subscribers --delay 1`，后续双路/安装回放全部通过。
 - 同一测试master残留私有namespace，测试Harness在创建节点前清理本任务节点参数；`final-suite`失败保留，`final-suite-r2`整套通过。此前 `load-final` 没收到慢订阅消息不能作为通过证据；最终套件已实际记录301批。
 - MCU默认LeakSanitizer退出检查在当前环境卡住；显式 `ASAN_OPTIONS=detect_leaks=0:verify_asan_link_order=0 UBSAN_OPTIONS=halt_on_error=1` 后ASan/UBSan完整通过。没有宣称LeakSanitizer通过。正常Release独立测试也通过。
+
+最终审核增加错误参数类型拒绝：`range_frame`、`baud_rate`、bridge去重容量使用非预期类型时明确启动失败，不回退默认值。专项测试与正常选帧/话题回归均通过，最终devel/install已重编译；数据处理、去重与wire算法未改动，不重复运行无关负载。
 
 ## 未执行的系统项目
 
