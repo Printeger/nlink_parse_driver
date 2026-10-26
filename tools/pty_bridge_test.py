@@ -53,6 +53,9 @@ class Harness:
     def __init__(self,out,frame=3,data=0,mode='unconfirmed',wide=False,lp=False,keys=10000,shared=False):
         self.out=out;out.mkdir(parents=True,exist_ok=True);self.messages=[];self.diags=[];self.driver_diags=[];self.latencies=[]
         self.node=TestNode('bridge_acceptance')
+        # A dedicated master can still retain private parameters from prior tests.
+        for namespace in ['/liuo_uwb_bridge','/uwb/n0/linktrack']:
+            if rospy.has_param(namespace):rospy.delete_param(namespace)
         qos=100
         self.sub=self.node.subscribe(UwbObservationBatch,'/liuo/uwb/observations',self.receive,qos)
         self.diag=self.node.subscribe(DiagnosticArray,'/liuo/uwb/diagnostics',lambda m:self.diags.append(m),10)
