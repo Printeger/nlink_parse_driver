@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Software PTY -> public ROS2 raw/stamped regression. No radio hardware."""
+"""Software PTY -> public ROS1 raw/stamped regression. No radio hardware."""
 import argparse
 import json
 import os
@@ -9,33 +9,33 @@ import re
 import signal
 import subprocess
 import time
-import rclpy
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+import rospy
+from ros1_test_support import TestNode, spin_wall
 import nlink_parser.msg as msgs
 
 parser=argparse.ArgumentParser();parser.add_argument('--output',required=True);args=parser.parse_args()
 out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
 root=Path(__file__).resolve().parents[1]
 fixtures=[bytes.fromhex(x) for x in json.loads((root/'packages/nlink_parser/test/linktrack_fixtures.json').read_text())]
-rclpy.init();node=rclpy.create_node('pty_driver_acceptance')
+node=TestNode('pty_driver_acceptance')
 received={};subs=[]
-qos=QoSProfile(depth=100,reliability=ReliabilityPolicy.BEST_EFFORT)
+qos=100
 for name in ['Anchorframe0','Tagframe0']+[f'Nodeframe{i}' for i in range(7)]:
     received[name]=[]
-    subs.append(node.create_subscription(getattr(msgs,'Linktrack'+name),'/test/nlink_linktrack_'+name.lower(),lambda m,n=name:received[n].append(m),qos))
+    subs.append(node.subscribe(getattr(msgs,'Linktrack'+name),'/test/nlink_linktrack_'+name.lower(),lambda m,n=name:received[n].append(m),qos))
     if name in ['Nodeframe0','Nodeframe2','Nodeframe3','Nodeframe5','Nodeframe6']:
         received[name+'Stamped']=[]
-        subs.append(node.create_subscription(getattr(msgs,'Linktrack'+name+'Stamped'),'/test/nlink_linktrack_'+name.lower()+'_stamped',lambda m,n=name:received[n+'Stamped'].append(m),qos))
+        subs.append(node.subscribe(getattr(msgs,'Linktrack'+name+'Stamped'),'/test/nlink_linktrack_'+name.lower()+'_stamped',lambda m,n=name:received[n+'Stamped'].append(m),qos))
 def spin(seconds):
     end=time.monotonic()+seconds
-    while time.monotonic()<end:rclpy.spin_once(node,timeout_sec=0.01)
+    while time.monotonic()<end:spin_wall(node,timeout_sec=0.01)
 def wait_count(name,n):
     end=time.monotonic()+3
-    while len(received[name])<n and time.monotonic()<end:rclpy.spin_once(node,timeout_sec=0.01)
+    while len(received[name])<n and time.monotonic()<end:spin_wall(node,timeout_sec=0.01)
     assert len(received[name])==n,(name,n,len(received[name]))
 master,slave=pty.openpty();port=os.ttyname(slave)
 log=(out/'driver.log').open('w')
-proc=subprocess.Popen(['ros2','run','nlink_parser','linktrack','--ros-args','-r','__ns:=/test','-p',f'port_name:={port}','-p','publish_debug_topics:=true'],stdout=log,stderr=log,start_new_session=True)
+proc=subprocess.Popen(['rosrun','nlink_parser','linktrack','__ns:=/test',f'_port_name:={port}','_publish_debug_topics:=true'],stdout=log,stderr=log,start_new_session=True)
 try:
     spin(2)
     for wire in fixtures:os.write(master,wire);spin(0.1)
@@ -60,7 +60,9 @@ try:
         m=received[name][-1];assert [len(x.data) for x in m.nodes]==[9,37]
     for name,dist in [('Nodeframe2',[3.179,5.548,6.728,4.651]),('Nodeframe3',[2.85,6.051,7.304,5.35]),('Nodeframe5',[2.85,6.051,7.304,5.35])]:
         for actual,expected in zip(received[name][-1].nodes,dist):assert abs(actual.dis-expected)<0.001
-        assert received[name][-1]==received[name+'Stamped'][-1].frame
+        raw=received[name][-1]; wrapped=received[name+'Stamped'][-1].frame
+        if hasattr(raw,'header'): raw.header.seq=wrapped.header.seq  # ROS1 transport-owned only
+        assert raw==wrapped
     f3=fixtures[5];initial=len(received['Nodeframe3'])
     for cut in range(1,len(f3)):
         os.write(master,f3[:cut]);spin(0.015)
@@ -82,10 +84,10 @@ try:
     spin(.03);noise_time=time.time_ns();os.write(master,b'noise');spin(.2)
     assert len(received['Nodeframe3Stamped'])==before+1
     delayed=received['Nodeframe3Stamped'][-1].context.header.stamp
-    assert delayed.sec*1000000000+delayed.nanosec<noise_time
+    assert delayed.secs*1000000000+delayed.nsecs<noise_time
     print(json.dumps({'status':'PASS','source':'software PTY','preserved_field_assertions':checked,'raw_frames':{k:len(v) for k,v in received.items()},'checks':['all imported LinkTrack types','device milliseconds','raw/stamped equal','Frame3 every split','concatenation sequences','bad length/checksum recovery']},indent=2))
 finally:
     os.killpg(proc.pid,signal.SIGINT)
     try:proc.wait(timeout=5)
     except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
-    log.close();os.close(master);os.close(slave);node.destroy_node();rclpy.shutdown()
+    log.close();os.close(master);os.close(slave);node.close();pass

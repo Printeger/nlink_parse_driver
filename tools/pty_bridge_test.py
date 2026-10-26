@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Raw serial PTY -> public ROS2 observations; explicitly synthetic inputs."""
+"""Raw serial PTY -> public ROS1 observations; explicitly synthetic inputs."""
 import argparse
 from collections import Counter
 from dataclasses import replace
@@ -13,8 +13,8 @@ import struct
 import subprocess
 import sys
 import time
-import rclpy
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+import rospy
+from ros1_test_support import TestNode, spin_wall
 from liuo_uwb_msgs.msg import UwbObservationBatch
 from diagnostic_msgs.msg import DiagnosticArray
 root=Path(__file__).resolve().parents[1]
@@ -52,11 +52,11 @@ def packet(reporter=1,seq=1,cycle=1,boot=42,peers=(2,),shard=0,shards=1):
 class Harness:
     def __init__(self,out,frame=3,data=0,mode='unconfirmed',wide=False,lp=False,keys=10000,shared=False):
         self.out=out;out.mkdir(parents=True,exist_ok=True);self.messages=[];self.diags=[];self.driver_diags=[];self.latencies=[]
-        self.node=rclpy.create_node('bridge_acceptance')
-        qos=QoSProfile(depth=100,reliability=ReliabilityPolicy.BEST_EFFORT)
-        self.sub=self.node.create_subscription(UwbObservationBatch,'/liuo/uwb/observations',self.receive,qos)
-        self.diag=self.node.create_subscription(DiagnosticArray,'/liuo/uwb/diagnostics',lambda m:self.diags.append(m),10)
-        self.driver_diag=self.node.create_subscription(DiagnosticArray,'/uwb/n0/nlink_diagnostics',lambda m:self.driver_diags.append(m),10)
+        self.node=TestNode('bridge_acceptance')
+        qos=100
+        self.sub=self.node.subscribe(UwbObservationBatch,'/liuo/uwb/observations',self.receive,qos)
+        self.diag=self.node.subscribe(DiagnosticArray,'/liuo/uwb/diagnostics',lambda m:self.diags.append(m),10)
+        self.driver_diag=self.node.subscribe(DiagnosticArray,'/uwb/n0/nlink_diagnostics',lambda m:self.driver_diags.append(m),10)
         self.master,self.slave=pty.openpty();self.port=out/'serial';self.port.symlink_to(os.ttyname(self.slave))
         self.registry=out/'registry.yaml'
         rows=[]
@@ -68,8 +68,8 @@ class Harness:
         if lp:rows=rows[:2]+[f'  - {{system_id: 0, operating_mode: LP, raw_role: 1, raw_id: {i}, logical_id: {i+1}, is_fixed: true}}' for i in range(1,19)]
         self.registry.write_text('nodes:\n'+'\n'.join(rows)+'\n')
         self.procs=[];self.logs=[]
-        self.start(['ros2','run','nlink_parser','linktrack','--ros-args','-r','__ns:=/uwb/n0','-p',f'port_name:={self.port}','-p',f'range_frame:={frame}','-p',f'data_frame:={data}'],'driver')
-        self.start(['ros2','run','liuo_uwb_bridge','range_bridge','--ros-args','-p',f'registry_path:={self.registry}','-p',f'operating_mode:={mode}','-p',f'range_frame:={frame}','-p',f'data_frame:={data}','-p','simulator:=true','-p',f'dedup_max_entries:={keys}','-p',f'shared_system_clock:={str(shared).lower()}','-p','clock_domain:=test_clock'],'bridge')
+        self.start(['rosrun','nlink_parser','linktrack','__ns:=/uwb/n0',f'_port_name:={self.port}',f'_range_frame:={frame}',f'_data_frame:={data}'],'driver')
+        self.start(['rosrun','liuo_uwb_bridge','range_bridge',f'_registry_path:={self.registry}',f'_operating_mode:={mode}',f'_range_frame:={frame}',f'_data_frame:={data}','_simulator:=true',f'_dedup_max_entries:={keys}',f'_shared_system_clock:={str(shared).lower()}','_clock_domain:=test_clock'],'bridge')
         self.spin(2)
     def receive(self,m):self.messages.append((time.monotonic(),m))
     def start(self,cmd,name):
@@ -77,11 +77,14 @@ class Harness:
         self.procs.append(subprocess.Popen(cmd,stdout=log,stderr=log,start_new_session=True))
     def spin(self,seconds):
         end=time.monotonic()+seconds
-        while time.monotonic()<end:rclpy.spin_once(self.node,timeout_sec=min(.01,max(0,end-time.monotonic())))
+        while time.monotonic()<end:spin_wall(self.node,timeout_sec=min(.01,max(0,end-time.monotonic())))
     def send(self,b):os.write(self.master,b)
     def count(self):return sum(len(m.observations) for _,m in self.messages)
     def expect(self,b,additional,timeout=.3):
-        before=self.count();self.send(b);self.spin(timeout);assert self.count()==before+additional,(before,additional,self.count())
+        before=self.count();self.send(b);self.spin(timeout)
+        deadline=time.monotonic()+1
+        while additional and self.count()<before+additional and time.monotonic()<deadline:self.spin(.005)
+        assert self.count()==before+additional,(before,additional,self.count())
         assert all(p.poll() is None for p in self.procs),'process died'
     def close(self):
         for p in reversed(self.procs):
@@ -90,7 +93,7 @@ class Harness:
                 try:p.wait(timeout=5)
                 except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGKILL);p.wait()
         for log in self.logs:log.close()
-        os.close(self.master);os.close(self.slave);self.node.destroy_node()
+        os.close(self.master);os.close(self.slave);self.node.close()
     def reconnect(self):
         os.close(self.master);os.close(self.slave);self.spin(.7)
         self.master,self.slave=pty.openpty();self.port.unlink();self.port.symlink_to(os.ttyname(self.slave));self.spin(1)
@@ -133,7 +136,7 @@ def faults(out):
         for _,batch in h.messages:
             for o in batch.observations:
                 assert math.isnan(o.time_uncertainty_s) and not o.pair_measurement_freshness_verified
-                if o.kind==1:assert o.time_basis==0 and o.source_frame_stamp.sec==0
+                if o.kind==1:assert o.time_basis==0 and o.source_frame_stamp.secs==0
         # Reconnect clears partial serial and sender envelopes.
         h.expect(data_frame([(1,encode(packet(1,3,3,44))[:30],0)]),0)
         h.send(range_frame(4)[:12]);h.spin(.02);h.reconnect()
@@ -160,8 +163,11 @@ def adapters(out):
 def load(out,seconds):
     h=Harness(out/'load');memory=[];next_memory=0;start=time.monotonic();next_local=start;next_remote=start;seq=0;cycle=0;peers=tuple(range(1,10));sent=Counter();arrivals=[]
     # This subscriber deliberately stalls on a separate executor/process, never the driver.
-    slow=out/'slow.py';slow.write_text('import rclpy,time\nfrom liuo_uwb_msgs.msg import UwbObservationBatch\nfrom rclpy.qos import QoSProfile,ReliabilityPolicy\nrclpy.init();n=rclpy.create_node("slow_subscriber");s=n.create_subscription(UwbObservationBatch,"/liuo/uwb/observations",lambda m:time.sleep(.2),QoSProfile(depth=2,reliability=ReliabilityPolicy.BEST_EFFORT));rclpy.spin(n)\n')
+    slow=out/'slow.py';slow.write_text('import rospy,time\nfrom liuo_uwb_msgs.msg import UwbObservationBatch\nrospy.init_node("slow_subscriber");s=rospy.Subscriber("/liuo/uwb/observations",UwbObservationBatch,lambda m:time.sleep(.2),queue_size=2,tcp_nodelay=True);rospy.spin()\n')
     h.start([sys.executable,str(slow)],'slow')
+    h.spin(1); h.messages.clear()
+    start=time.monotonic(); next_local=start; next_remote=start
+    expected={}; sent_windows=[Counter() for _ in range(int(seconds)//10)]
     try:
         while time.monotonic()<start+seconds:
             now=time.monotonic()
@@ -179,22 +185,35 @@ def load(out,seconds):
                 next_memory=now+1
             if now>=next_local:
                 seq+=1;h.send(range_frame(seq,peers=peers));sent['local_frames']+=1;next_local+=.02
+                for peer in peers:expected[(0,peer,seq)]=int((now-start)//10)
             if now>=next_remote:
                 cycle+=1
                 for sender in range(1,4):
                     edges=tuple(i for i in range(1,10) if i!=sender)
                     for shard in range(2):
                         h.send(data_frame([(sender,encode(packet(sender,seq,cycle,100+sender,edges[5*shard:5*shard+5],shard,2)),0)]));sent['remote_packets']+=1
+                    for peer in edges:expected[(sender,peer,seq)]=int((now-start)//10)
                 next_remote+=.2
-            rclpy.spin_once(h.node,timeout_sec=.001)
+            spin_wall(h.node,timeout_sec=.001)
         h.spin(.3)
         counts=Counter();windows=[Counter() for _ in range(int(seconds)//10)]
+        actual=Counter();latencies=[]
         for when,b in h.messages:
-            if start<=when<start+seconds:
-                win=int((when-start)//10)
-                for o in b.observations:
-                    k=(o.reporter_id,o.node_b);counts[k]+=1
-                    if win<len(windows):windows[win][k]+=1
+            for o in b.observations:
+                identity=(o.reporter_id,o.node_b,o.source_frame_seq)
+                # Local source seq counts all serial frames, so correlate each local
+                # frame through its device millisecond counter instead.
+                if o.kind==0:identity=(0,o.node_b,o.source_local_ms//20)
+                actual[identity]+=1
+                assert identity in expected,identity
+                k=identity[:2];counts[k]+=1
+                win=expected[identity]
+                if win<len(windows):windows[win][k]+=1
+        assert set(actual)==set(expected),(len(actual),len(expected))
+        assert all(n==1 for n in actual.values()),'duplicate observations'
+        for (reporter,peer,seq),win in expected.items():
+            if win<len(sent_windows):sent_windows[win][(reporter,peer)]+=1
+        assert windows==sent_windows,'per-edge 10s send/receive mismatch'
         local={f'{a}->{b}':counts[(a,b)]/seconds for a,b in [(0,i) for i in peers]}
         remote={f'{a}->{b}':counts[(a,b)]/seconds for a in range(1,4) for b in range(1,10) if a!=b}
         assert min(local.values())>=20,local
@@ -203,16 +222,16 @@ def load(out,seconds):
         diag={v.key:v.value for v in h.diags[-1].status[0].values} if h.diags else {}
         assert int(diag.get('packet_cache_keys','10001'))<=10000
         assert int(diag.get('observation_cache_keys','10001'))<=10000
-        return {'status':'PASS','source':'software PTY, no RF','seconds':seconds,'memory_samples':memory,'sent':dict(sent),'local_edge_hz':local,'remote_edge_hz':remote,'10s_windows':[{f'{a}->{b}':n/10 for (a,b),n in w.items()} for w in windows],'diagnostics':diag,'driver_diagnostics':{v.key:v.value for v in h.driver_diags[-1].status[0].values} if h.driver_diags else {}}
+        return {'status':'PASS','source':'software PTY, no RF','seconds':seconds,'memory_samples':memory,'sent':dict(sent),'expected_observations':len(expected),'received_observations':sum(actual.values()),'per_edge_exact_match':True,'window_basis':'send time; tail drained, no extra input','local_edge_hz':local,'remote_edge_hz':remote,'10s_windows':[{f'{a}->{b}':n/10 for (a,b),n in w.items()} for w in windows],'diagnostics':diag,'driver_diagnostics':{v.key:v.value for v in h.driver_diags[-1].status[0].values} if h.driver_diags else {}}
     finally:h.close()
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--output',required=True);p.add_argument('--load-seconds',type=int,default=60);p.add_argument('--only',choices=['all','faults','load','adapters'],default='all');a=p.parse_args()
-    out=Path(a.output);out.mkdir(parents=True,exist_ok=True);rclpy.init();report={}
+    out=Path(a.output);out.mkdir(parents=True,exist_ok=True);report={}
     try:
         if a.only in ['all','faults']:report['faults']=faults(out)
         if a.only in ['all','adapters']:report['adapters']=adapters(out)
         if a.only in ['all','load']:report['load']=load(out,a.load_seconds)
         (out/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))
-    finally:rclpy.shutdown()
+    finally:pass
 if __name__=='__main__':main()

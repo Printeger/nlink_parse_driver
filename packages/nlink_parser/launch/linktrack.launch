@@ -1,6 +1,13 @@
 <launch>
-    <node pkg="nlink_parser" type="linktrack" name="linktrack0" output="screen">
-        <param name="port_name" value="/dev/ttyCH343USB0" />
-        <param name="baud_rate" value="921600" />
+  <arg name="port" default="/dev/ttyACM0"/>
+  <arg name="baud" default="921600"/>
+  <arg name="namespace" default="/uwb/n0"/>
+  <arg name="publish_debug_topics" default="false"/>
+  <group ns="$(arg namespace)">
+    <node pkg="nlink_parser" type="linktrack" name="linktrack" output="screen">
+      <param name="port_name" value="$(arg port)"/>
+      <param name="baud_rate" value="$(arg baud)" type="int"/>
+      <param name="publish_debug_topics" value="$(arg publish_debug_topics)"/>
     </node>
+  </group>
 </launch>

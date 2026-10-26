@@ -1,27 +1,27 @@
 #include "liuo_uwb_bridge/registry.hpp"
 #include "liuo_uwb_bridge/state.hpp"
 #include <liuo_uwb_protocol/codec.hpp>
-#include <liuo_uwb_msgs/msg/uwb_observation_batch.hpp>
-#include <nlink_parser/msg/linktrack_nodeframe0_stamped.hpp>
-#include <nlink_parser/msg/linktrack_nodeframe2_stamped.hpp>
-#include <nlink_parser/msg/linktrack_nodeframe3_stamped.hpp>
-#include <nlink_parser/msg/linktrack_nodeframe5_stamped.hpp>
-#include <nlink_parser/msg/linktrack_nodeframe6_stamped.hpp>
-#include <diagnostic_msgs/msg/diagnostic_array.hpp>
-#include <std_srvs/srv/trigger.hpp>
-#include <rclcpp/rclcpp.hpp>
+#include <liuo_uwb_msgs/UwbObservationBatch.h>
+#include <nlink_parser/LinktrackNodeframe0Stamped.h>
+#include <nlink_parser/LinktrackNodeframe2Stamped.h>
+#include <nlink_parser/LinktrackNodeframe3Stamped.h>
+#include <nlink_parser/LinktrackNodeframe5Stamped.h>
+#include <nlink_parser/LinktrackNodeframe6Stamped.h>
+#include <diagnostic_msgs/DiagnosticArray.h>
+#include <std_srvs/Trigger.h>
+#include <ros/ros.h>
 #include <chrono>
 #include <limits>
 #include <random>
 using namespace liuo::uwb;
-using Observation=liuo_uwb_msgs::msg::UwbObservation;
-using Batch=liuo_uwb_msgs::msg::UwbObservationBatch;
-using Context=nlink_parser::msg::NLinkRxContext;
+using Observation=liuo_uwb_msgs::UwbObservation;
+using Batch=liuo_uwb_msgs::UwbObservationBatch;
+using Context=nlink_parser::NLinkRxContext;
 namespace {
 uint64_t new_session(){std::random_device r;return ((uint64_t(r())<<32)|r())|1;}
 uint64_t steady(){return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
-int64_t ns(const builtin_interfaces::msg::Time& t){return int64_t(t.sec)*1000000000+t.nanosec;}
-builtin_interfaces::msg::Time stamp(int64_t n){return rclcpp::Time(std::max<int64_t>(0,n));}
+int64_t ns(const ros::Time& t){return t.toNSec();}
+ros::Time stamp(int64_t n){ros::Time t; t.fromNSec(std::max<int64_t>(0,n)); return t;}
 struct Source {
  uint32_t boot{},last_cycle{},last_source{};uint64_t session{},received_cycles{},complete_cycles{};std::vector<uint32_t> dead;
  SequenceWindow packets,observations;EnvelopeStream stream;
@@ -41,38 +41,41 @@ struct Rate {
  double rate(uint64_t t,size_t window)const{uint64_t sec=t/1000000000;uint64_t count=0;for(size_t k=0;k<60;++k)if(seconds[k]<=sec && sec-seconds[k]<window)count+=counts[k];return double(count)/window;}
 };
 }
-class Bridge:public rclcpp::Node {
+class Bridge {
+  ros::NodeHandle nh_, private_{"~"};
+  template<class T> T parameter(const std::string& key, const T& value) { T result; private_.param<T>(key,result,value); return result; }
+
  public:
-  Bridge():Node("liuo_uwb_bridge"),registry_(declare_parameter<std::string>("registry_path","")) {
-    network_=declare_parameter<std::string>("network_instance","unconfigured");
-    mode_=declare_parameter<std::string>("operating_mode","unconfirmed");system_=declare_parameter<int>("system_id",0);
+  Bridge():registry_(parameter<std::string>("registry_path","")) {
+    network_=parameter<std::string>("network_instance","unconfigured");
+    mode_=parameter<std::string>("operating_mode","unconfirmed");system_=parameter<int>("system_id",0);
     if(network_.empty() || system_<0)throw std::invalid_argument("network/system required");
-    replay_=declare_parameter<bool>("replay_mode",false);
-    shared_=declare_parameter<bool>("shared_system_clock",false);clock_domain_=declare_parameter<std::string>("clock_domain","");
-    for(const auto& name:{"fixed_to_fixed_local_range","simultaneous_ranging_and_data","hundred_byte_payload","pair_freshness_guaranteed"}) capabilities_[name]=declare_parameter<bool>(name,false);
-    capacity_=declare_parameter<int>("capacity",0);simulator_=declare_parameter<bool>("simulator",false);
-    if(declare_parameter<bool>("allow_rate_degrade",false) || declare_parameter<bool>("forward_received_reports",false))throw std::invalid_argument("rate degradation/forwarding unsupported in v1");
-    limit_=declare_parameter<int>("max_distance_mm",0x7fffff);max_keys_=declare_parameter<int>("dedup_max_entries",10000);
+    replay_=parameter<bool>("replay_mode",false);
+    shared_=parameter<bool>("shared_system_clock",false);clock_domain_=parameter<std::string>("clock_domain","");
+    for(const auto& name:{"fixed_to_fixed_local_range","simultaneous_ranging_and_data","hundred_byte_payload","pair_freshness_guaranteed"}) capabilities_[name]=parameter<bool>(name,false);
+    capacity_=parameter<int>("capacity",0);simulator_=parameter<bool>("simulator",false);
+    if(parameter<bool>("allow_rate_degrade",false) || parameter<bool>("forward_received_reports",false))throw std::invalid_argument("rate degradation/forwarding unsupported in v1");
+    limit_=parameter<int>("max_distance_mm",0x7fffff);max_keys_=parameter<int>("dedup_max_entries",10000);
     if(limit_<1 || limit_>0x7fffff || max_keys_<1 || max_keys_>10000)throw std::invalid_argument("invalid bounds");
-    int range=declare_parameter<int>("range_frame",3),data=declare_parameter<int>("data_frame",0);
-    auto prefix=declare_parameter<std::string>("input_namespace","/uwb/n0");
-    auto qos=rclcpp::QoS(100).durability_volatile();if(declare_parameter<bool>("reliable_qos",false))qos.reliable();else qos.best_effort();
-    output_=create_publisher<Batch>("/liuo/uwb/observations",qos);
-    diag_=create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/liuo/uwb/diagnostics",rclcpp::QoS(10).reliable());
+    int range=parameter<int>("range_frame",3),data=parameter<int>("data_frame",0);
+    auto prefix=parameter<std::string>("input_namespace","/uwb/n0");
+    output_=nh_.advertise<Batch>("/liuo/uwb/observations",100,false);
+    diag_=nh_.advertise<diagnostic_msgs::DiagnosticArray>("/liuo/uwb/diagnostics",10,false);
     auto topic=[&](int n){return prefix+"/nlink_linktrack_nodeframe"+std::to_string(n)+"_stamped";};
-    if(range==2)subs_.push_back(create_subscription<nlink_parser::msg::LinktrackNodeframe2Stamped>(topic(2),qos,[this](nlink_parser::msg::LinktrackNodeframe2Stamped::ConstSharedPtr m){local(*m);}));
-    else if(range==3)subs_.push_back(create_subscription<nlink_parser::msg::LinktrackNodeframe3Stamped>(topic(3),qos,[this](nlink_parser::msg::LinktrackNodeframe3Stamped::ConstSharedPtr m){local(*m);}));
-    else if(range==5)subs_.push_back(create_subscription<nlink_parser::msg::LinktrackNodeframe5Stamped>(topic(5),qos,[this](nlink_parser::msg::LinktrackNodeframe5Stamped::ConstSharedPtr m){local(*m);}));
+    if(range==2)subs_.push_back(nh_.subscribe<nlink_parser::LinktrackNodeframe2Stamped>(topic(2),100,[this](nlink_parser::LinktrackNodeframe2Stamped::ConstPtr m){local(*m);},ros::VoidConstPtr(),ros::TransportHints().tcpNoDelay()));
+    else if(range==3)subs_.push_back(nh_.subscribe<nlink_parser::LinktrackNodeframe3Stamped>(topic(3),100,[this](nlink_parser::LinktrackNodeframe3Stamped::ConstPtr m){local(*m);},ros::VoidConstPtr(),ros::TransportHints().tcpNoDelay()));
+    else if(range==5)subs_.push_back(nh_.subscribe<nlink_parser::LinktrackNodeframe5Stamped>(topic(5),100,[this](nlink_parser::LinktrackNodeframe5Stamped::ConstPtr m){local(*m);},ros::VoidConstPtr(),ros::TransportHints().tcpNoDelay()));
     else throw std::invalid_argument("range_frame must be 2/3/5");
-    if(data==0)subs_.push_back(create_subscription<nlink_parser::msg::LinktrackNodeframe0Stamped>(topic(0),qos,[this](nlink_parser::msg::LinktrackNodeframe0Stamped::ConstSharedPtr m){remote(*m);}));
-    else if(data==6)subs_.push_back(create_subscription<nlink_parser::msg::LinktrackNodeframe6Stamped>(topic(6),qos,[this](nlink_parser::msg::LinktrackNodeframe6Stamped::ConstSharedPtr m){remote(*m);}));
+    if(data==0)subs_.push_back(nh_.subscribe<nlink_parser::LinktrackNodeframe0Stamped>(topic(0),100,[this](nlink_parser::LinktrackNodeframe0Stamped::ConstPtr m){remote(*m);},ros::VoidConstPtr(),ros::TransportHints().tcpNoDelay()));
+    else if(data==6)subs_.push_back(nh_.subscribe<nlink_parser::LinktrackNodeframe6Stamped>(topic(6),100,[this](nlink_parser::LinktrackNodeframe6Stamped::ConstPtr m){remote(*m);},ros::VoidConstPtr(),ros::TransportHints().tcpNoDelay()));
     else throw std::invalid_argument("data_frame must be 0/6");
     for(auto id:registry_.ids())if(id)sources_.try_emplace(uint8_t(id));
     reset_dataset();
-    reset_=create_service<std_srvs::srv::Trigger>("~/reset_replay",[this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,std::shared_ptr<std_srvs::srv::Trigger::Response> res){res->success=replay_;if(replay_){reset_dataset();res->message="new replay dataset session";}else res->message="live reset denied";});
-    timer_=create_wall_timer(std::chrono::seconds(1),[this]{diagnostics();});
+    reset_=private_.advertiseService("reset_replay", &Bridge::reset_replay, this);
+    timer_=nh_.createSteadyTimer(ros::WallDuration(1),[this](const ros::SteadyTimerEvent&){diagnostics();});
   }
  private:
+  bool reset_replay(std_srvs::Trigger::Request&,std_srvs::Trigger::Response& res) {res.success=replay_; if(replay_){reset_dataset();res.message="new replay dataset session";}else res.message="live reset denied";return true;}
   void reset_dataset(){driver_session_=new_session();session_counter_=0;port_=0;last_rx_seq_=0;last_mono_=0;stream_mono_.fill(0);have_ros_offset_=false;dead_ports_.clear();local_session_=++session_counter_;clock_.clear();system_clock_.clear();for(auto& s:sources_)s.second=Source{};rates_.clear();source_rate_=Rate{};packet_rate_=Rate{};}
   bool context(const Context& c){
     if(!c.port_session_id || !c.rx_frame_seq || c.function_mark>=stream_mono_.size()){++errors_["invalid_context"];return false;}
@@ -94,13 +97,13 @@ class Bridge:public rclcpp::Node {
   Observation base(const Context& c){Observation o;o.received_stamp=c.header.stamp;o.time_uncertainty_s=std::numeric_limits<float>::quiet_NaN();o.source_hold_age_ms=65535;o.fp_rssi=o.rx_rssi=std::numeric_limits<float>::quiet_NaN();o.source_frame_seq_valid=true;return o;}
   void publish(std::vector<Observation> observations,uint8_t trigger){
     if(observations.empty())return;
-    Batch b;b.header.stamp=now();b.driver_session_id=driver_session_;b.batch_seq=++batch_seq_;b.trigger_type=trigger;b.receiver_id=0;b.observations=std::move(observations);
+    Batch b;b.header.stamp=ros::Time::now();b.driver_session_id=driver_session_;b.batch_seq=++batch_seq_;b.trigger_type=trigger;b.receiver_id=0;b.observations=std::move(observations);
     for(const auto& o:b.observations){
       auto key=std::make_pair(o.reporter_id,o.node_b);
       if(!rates_.count(key) && rates_.size()>=1024){auto oldest=std::min_element(rates_.begin(),rates_.end(),[](const auto& a,const auto& b){return a.second.last<b.second.last;});rates_.erase(oldest);++errors_["rate_state_eviction"];}
       rates_[key].add(last_mono_);
     }
-    output_->publish(b);
+    output_.publish(b);
   }
   template<class M>void local(const M& m){
     if(!receiver(m.frame.role,m.frame.id) || !context(m.context))return;
@@ -173,8 +176,8 @@ class Bridge:public rclcpp::Node {
     }
   }
   void diagnostics(){
-    bound_caches();diagnostic_msgs::msg::DiagnosticArray a;a.header.stamp=now();diagnostic_msgs::msg::DiagnosticStatus s;s.name="liuo_uwb_bridge";s.hardware_id=network_;s.level=1;s.message="hardware UNKNOWN; frame reports are not verified TWR freshness";
-    auto add=[&](std::string k,std::string v){diagnostic_msgs::msg::KeyValue kv;kv.key=std::move(k);kv.value=std::move(v);s.values.push_back(kv);};
+    bound_caches();diagnostic_msgs::DiagnosticArray a;a.header.stamp=ros::Time::now();diagnostic_msgs::DiagnosticStatus s;s.name="liuo_uwb_bridge";s.hardware_id=network_;s.level=1;s.message="hardware UNKNOWN; frame reports are not verified TWR freshness";
+    auto add=[&](std::string k,std::string v){diagnostic_msgs::KeyValue kv;kv.key=std::move(k);kv.value=std::move(v);s.values.push_back(kv);};
     add("mode",mode_);add("capacity",std::to_string(capacity_));add("simulator",simulator_?"true":"false");add("network_instance",network_);add("dataset_session",std::to_string(driver_session_));
     for(auto cap:capabilities_)add(cap.first,cap.second?"configured_verified":"false");
     add("shared_system_clock",shared_?"configured_verified":"false");add("clock_domain",clock_domain_);add("pair_measurement_rate","unknown");add("wire_tx_rate","unknown (MCU log required)");add("radio_loss","unknown (TX log required)");add("remote_source_frame_rate","unknown (MCU source log required)");add("degraded","false");
@@ -189,14 +192,14 @@ class Bridge:public rclcpp::Node {
     }
     add("packet_cache_keys",std::to_string(pk));add("observation_cache_keys",std::to_string(ob));add("fragment_bytes",std::to_string(fragments));add("tombstones",std::to_string(tombs));add("processing_latency_peak_ms",std::to_string(latency_peak_ns_/1e6));
     add("clock_state",std::to_string(int(clock_.state)));add("clock_alpha",std::to_string(clock_.alpha));add("clock_residual_ms",std::to_string(clock_.residual_ns/1e6));add("time_uncertainty","unknown; one-way offset unidentifiable");
-    for(auto err:errors_)add(err.first,std::to_string(err.second));a.status.push_back(s);diag_->publish(a);
+    for(auto err:errors_)add(err.first,std::to_string(err.second));a.status.push_back(s);diag_.publish(a);
   }
   Registry registry_;std::string network_,mode_,clock_domain_;int system_{},capacity_{},limit_{},max_keys_{};bool replay_{},shared_{},simulator_{};
   std::map<std::string,bool> capabilities_;std::map<std::string,uint64_t> errors_;
   std::map<uint8_t,Source> sources_;std::map<std::pair<uint8_t,uint8_t>,Rate> rates_;Rate source_rate_,packet_rate_;
   uint64_t driver_session_{},session_counter_{},local_session_{},batch_seq_{},port_{},last_rx_seq_{},last_mono_{},rx_high_{},latency_peak_ns_{};std::vector<uint64_t> dead_ports_;
   bool have_ros_offset_{};int64_t ros_offset_{};std::array<uint64_t,10> stream_mono_{};ClockMapper clock_,system_clock_;
-  std::vector<rclcpp::SubscriptionBase::SharedPtr> subs_;rclcpp::Publisher<Batch>::SharedPtr output_;rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_;rclcpp::TimerBase::SharedPtr timer_;
+  std::vector<ros::Subscriber> subs_;ros::Publisher output_;ros::Publisher diag_;
+  ros::ServiceServer reset_;ros::SteadyTimer timer_;
 };
-int main(int argc,char** argv){rclcpp::init(argc,argv);try{rclcpp::spin(std::make_shared<Bridge>());}catch(const std::exception& e){fprintf(stderr,"bridge: %s\n",e.what());rclcpp::shutdown();return 1;}rclcpp::shutdown();}
+int main(int argc,char** argv){ros::init(argc,argv,"liuo_uwb_bridge");try{Bridge bridge;ros::spin();}catch(const std::exception& e){fprintf(stderr,"bridge: %s\n",e.what());ros::shutdown();return 1;}ros::shutdown();}

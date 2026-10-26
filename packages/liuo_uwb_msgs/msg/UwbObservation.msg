@@ -24,8 +24,8 @@ uint32 source_system_ms
 bool source_local_time_valid
 bool source_system_time_valid
 uint8 time_basis
-builtin_interfaces/Time source_frame_stamp
-builtin_interfaces/Time received_stamp
+time source_frame_stamp
+time received_stamp
 uint16 source_hold_age_ms
 bool source_hold_age_valid
 float32 time_uncertainty_s

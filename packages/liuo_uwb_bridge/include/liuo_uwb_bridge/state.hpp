@@ -77,7 +77,7 @@ class ClockMapper {
     if(have_) {
       uint32_t delta=device-previous_;
       auto dm=mono>=last_mono_?mono-last_mono_:UINT64_MAX;
-      if(delta>10000 || dm>10000000000ull || ros<=0 || std::abs(double(ros-last_ros_)-double(dm))>100000000.0) {clear();reset=true;}
+      if(delta>10000 || dm>10000000000ull || ros<=0 || (mono>last_mono_ && ros<=last_ros_) || std::abs(double(ros-last_ros_)-double(dm))>100000000.0) {clear();reset=true;}
       else unwrapped_+=delta;
     }
     if(!have_){unwrapped_=device;base_device_=unwrapped_;base_mono_=mono;}

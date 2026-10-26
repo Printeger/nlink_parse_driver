@@ -1,61 +1,111 @@
-# UWB ROS2 驱动与 Range Relay v1
+# UWB ROS1 驱动与固定边转发
 
-目标平台 Ubuntu 24.04 / ROS 2 Jazzy。单串口所有者 `nlink_parser/linktrack` 发布原始 LinkTrack 帧及接收 context，独立 `liuo_uwb_bridge/range_bridge` 即时输出 `/liuo/uwb/observations`。平台无关 MCU 逻辑每200ms冻结单一源帧并发完整分包轮次。
+当前分支 `feat/uwb-ros1-relay-v1` 面向 Ubuntu 20.04 / ROS Noetic / Python 3.8 / C++17。从 ROS2 提交 `a13dc6dc26ff7fed11272c2ec9a9f29020805b9a` 移植；软件验证、已知限制及证据见 [ROS1 验收报告](docs/ros1_software_acceptance.md)。真实无线、MCU 板级和 LIUO 融合未验收。
 
-新增消息的功能、字段格式、时间语义、Python 订阅示例及实际效果见 [UWB 观测消息 README](packages/liuo_uwb_msgs/README.md)。
-
-软件验收状态与证据见 [验收报告](docs/software_acceptance.md)。**没有实机无线、板级烧录或 LIUO 融合验收**；模拟≥20Hz不证明真实TWR频率。默认硬件能力false、模式unconfirmed、capacity=0、legacy TX与降级关闭。
-
-规范：[handbook](docs/uwb_driver_design_notebook.md)、[ROS2需求](docs/uwb_ros2_development_requirements.md)。接口兼容性见 [ROS2迁移说明](docs/ros2_migration.md)，时间/会话与消费者要求见 [LIUO接入合同](docs/liuo_integration_contract.md)，MCU见 [HAL与模拟说明](firmware/anchor_relay/README.md)。原ROS1说明保留在docs/README.ros1.*，不能按其中catkin/submodule命令构建当前版本。
+`nlink_parser/linktrack` 唯一拥有串口，使用新版 framer、校验、接收 context 和重连逻辑；独立 `liuo_uwb_bridge/range_bridge` 订阅 stamped 输入。每个新本地帧立即发布 ROBOT_ANCHOR，每个远端有效分包立即发布 ANCHOR_ANCHOR。固定端 5 Hz 指完整轮次，不把机器人本地流节流为 5 Hz。
 
 ## 构建与测试
 
-依赖已安装的 Jazzy、colcon、CMake、C/C++编译器、yaml-cpp、Python3/rclpy/rosbag2。只扫描本仓库packages，不扫描相邻ROS1项目。全部产物在数据盘：
+当前工作区 `/home/mint/ws_calib` 已有其他工程。本任务使用专用 catkin profile，命令仅构建四包及其依赖，不清理旧 build/devel。
 
 ```bash
-cd /home/dev/code/ws_tunnel/src/nlink_parser_uwb
-data-run --check
-data-run -- tools/build_test.sh
-data-run -- tools/test_nlink_core.sh
-data-run -- cmake -S firmware/anchor_relay -B /home/dev/ws_iap/uwb_ros2/mcu-build -DCMAKE_BUILD_TYPE=Debug
-data-run -- cmake --build /home/dev/ws_iap/uwb_ros2/mcu-build -j2
-data-run -- ctest --test-dir /home/dev/ws_iap/uwb_ros2/mcu-build --output-on-failure
+cd /home/mint/ws_calib/src/nlink_parse_driver
+bash --noprofile --norc tools/build_test.sh
+source tools/ros1_env.sh
+# 另建专用 master，全部 PTY 合成输入；默认包含60秒负载。
+tools/run_ros1_acceptance.sh
+# 无 ROS 的解析/分配失败测试（ASan/UBSan）
+tools/test_nlink_core.sh
+# 无 ROS 的 MCU、协议黄金向量和2000组跨语言检查
+cmake -S firmware/anchor_relay -B /home/mint/ws_calib/evidence/uwb_ros1/mcu-user -DCMAKE_BUILD_TYPE=Release
+cmake --build /home/mint/ws_calib/evidence/uwb_ros1/mcu-user -j4
+(cd /home/mint/ws_calib/evidence/uwb_ros1/mcu-user && ctest --output-on-failure)
 ```
 
-完整PTY软件验收（新的输出目录；不能覆盖活动记录）：
+安装验证采用第二个隔离 profile，不依赖旧 devel：
 
 ```bash
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; python3 tools/pty_driver_test.py --output /home/dev/ws_iap/uwb_ros2/recheck-driver'
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; python3 tools/pty_bridge_test.py --output /home/dev/ws_iap/uwb_ros2/recheck-integration --load-seconds 60'
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; python3 tools/state_integration_test.py --output /home/dev/ws_iap/uwb_ros2/recheck-state'
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; python3 tools/bag_smoke.py --output /home/dev/ws_iap/uwb_ros2/recheck-bag'
+source /opt/ros/noetic/setup.bash
+catkin config --workspace /home/mint/ws_calib --profile uwb_ros1_install \
+  --extend /opt/ros/noetic --build-space build_uwb_ros1_install \
+  --devel-space devel_uwb_ros1_install --install-space install_uwb_ros1 \
+  --log-space logs_uwb_ros1_install --install \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPYTHON_EXECUTABLE=/usr/bin/python3
+catkin build --workspace /home/mint/ws_calib --profile uwb_ros1_install \
+  nlink_parser liuo_uwb_msgs liuo_uwb_protocol liuo_uwb_bridge -j4 -p2 --no-status
+# 在新的干净 shell 中加载 install，而非旧工作区 devel：
+source /opt/ros/noetic/setup.bash
+source /home/mint/ws_calib/install_uwb_ros1/setup.bash
+rosmsg show liuo_uwb_msgs/UwbObservationBatch
+python3 -c 'from liuo_uwb_msgs.msg import UwbObservationBatch; print(UwbObservationBatch._md5sum)'
 ```
 
-测试使用同一ROS域，依次执行，测试期间停止其他同名驱动。工具显式生成模拟串口输入，不标为实测。
+依赖为 catkin、roscpp、rospy、std_msgs、diagnostic_msgs、std_srvs、message_generation/message_runtime、rosbag、roslaunch、yaml-cpp，测试还使用 Python yaml、rosgraph_msgs。串口库 vendored，普通 CMake target 编译，禁止自动更新依赖。`extern/serial/CATKIN_IGNORE` 防止嵌套包发现。
 
-## 启动与配置
-
-先按真实设备身份编辑独立registry.yaml；示例只是逻辑N0–N19与raw role=0/id相同的未确认配置，不会自动检测模式或修改设备。键为system_id/operating_mode/raw_role/raw_id，DR_MODE1保留32位ID，LP同号异角色必须分开。配置文件为合法ROS2 `ros__parameters`；能力标志只有独立实测证据支持后才能手工开启。
+## 启动与诊断
 
 ```bash
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; ros2 launch liuo_uwb_bridge robot.launch.py port:=/dev/ttyUSB0 baud:=921600 namespace:=/uwb/n0 use_sim_time:=false'
+source /home/mint/ws_calib/src/nlink_parse_driver/tools/ros1_env.sh
+roslaunch liuo_uwb_bridge robot.launch port:=/dev/ttyACM0 baud:=921600
+# 其他终端加载同一环境后：
+rostopic echo -n 1 /liuo/uwb/observations
+rostopic echo -n 1 /liuo/uwb/diagnostics
+rostopic echo -n 1 /uwb/n0/nlink_diagnostics
+rostopic hz /uwb/n0/nlink_linktrack_nodeframe3_stamped
+rosrun liuo_uwb_bridge observation_reader.py
 ```
 
-launch还提供`config:=/绝对路径/uwb.yaml`与`registry:=/绝对路径/registry.yaml`。选择range_frame=2/3/5及data_frame=0/6，默认3/0，不能同时开所有测距流制造重复。设备local_time现为毫秒，不是导入版本写入的Unix微秒。
+`rostopic hz` 仅检查帧话题，不代替逐边频率验收。主话题类型为 `liuo_uwb_msgs/UwbObservationBatch`，同时含两种 kind，字段见 [消息说明](packages/liuo_uwb_msgs/README.md) 和 [LIUO 合同](docs/liuo_integration_contract.md)。
 
-默认 `publish_debug_topics: false`，驱动只创建所选测距帧和数传帧的 `_stamped` 话题。默认业务话题为 `/uwb/n0/nlink_linktrack_nodeframe3_stamped`、`/uwb/n0/nlink_linktrack_nodeframe0_stamped`、`/liuo/uwb/observations`，另保留两路诊断和 ROS 系统话题。LIUO 使用 observations。其余原始/未选中的话题不创建、不发布；所有帧解析能力保留。排查其他协议帧或兼容旧订阅者时，将配置中的 `publish_debug_topics` 设为 `true` 并重启，可恢复全部原始和 stamped 话题。直接运行驱动时可传 `--ros-args -p publish_debug_topics:=true`。这些参数在启动时读取。
+默认仅有五个业务发布话题：
 
-## 录包与回放
+```text
+/uwb/n0/nlink_linktrack_nodeframe3_stamped
+/uwb/n0/nlink_linktrack_nodeframe0_stamped
+/uwb/n0/nlink_diagnostics
+/liuo/uwb/observations
+/liuo/uwb/diagnostics
+```
+
+`/rosout`、`/rosout_agg`、按需 `/clock` 是系统话题。range_frame 支持 2/3/5，data_frame 支持 0/6。配置 [uwb.yaml](packages/liuo_uwb_bridge/config/uwb.yaml) 为平面 YAML，分别加载到两个节点私有空间；修改后重启。要恢复全部9种原始与5种 stamped 输出，把配置副本中的 `publish_debug_topics` 设为 true 并用 `config:=绝对路径` 启动。`enable_legacy_tx` 默认为 false；显式开启也保留100 B、队列和速率限制。
+
+launch 支持 `port`、`baud`、`config`、`registry`、`namespace`、`use_sim_time`。显式 launch 参数在 YAML 后设置，优先级更高。`use_sim_time` 设置全局 `/use_sim_time`；串口、重连及诊断使用单调定时器，暂停仿真时不阻塞。
+
+默认 registry 中 `(system_id=0, operating_mode=unconfirmed, raw_role=0, raw_id=19)` 映射到逻辑机器人 N0，raw12 是固定 N12；19 不再有冲突固定条目。其他固定条目是待核对示例。未知身份有诊断计数，不自动认领。mode=unconfirmed、capacity=0、硬件能力=false，不因串口有数据而声明无线转发通过。
+
+## ROS1 录包与回放
 
 ```bash
-data-run -- tools/record.sh /home/dev/ws_iap/uwb_ros2/my_new_bag
-# 单独启动回放bridge；registry必须与录包数据集一致，不启动串口驱动。
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; ros2 run liuo_uwb_bridge range_bridge --ros-args -p registry_path:=/home/dev/code/ws_tunnel/src/nlink_parser_uwb/packages/liuo_uwb_bridge/config/registry.yaml -p replay_mode:=true'
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; ros2 bag play /home/dev/ws_iap/uwb_ros2/my_new_bag --topics /uwb/n0/nlink_linktrack_nodeframe3_stamped /uwb/n0/nlink_linktrack_nodeframe0_stamped --qos-profile-overrides-path /home/dev/code/ws_tunnel/src/nlink_parser_uwb/packages/liuo_uwb_bridge/config/bag_qos.yaml'
-# 每次重复/seek前开启新的回放数据集：
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; ros2 service call /liuo_uwb_bridge/reset_replay std_srvs/srv/Trigger "{}"'
+# 默认五个业务话题；只录选中 stamped，不订阅关闭的 raw。
+tools/record.sh /home/mint/ws_calib/evidence/uwb_ros1/session.bag
+# 非默认选帧：record.sh OUTPUT.bag /uwb/n0 5 6
+rosbag info /home/mint/ws_calib/evidence/uwb_ros1/session.bag
 ```
 
-原始/stamped/观测默认best_effort/volatile/keep_last100，诊断reliable/volatile/keep_last10。可靠订阅者不能匹配best_effort发布者；录包override已提供。记录时同时保存配置、registry、Git SHA、设备/固件/模式以及真实MCU发送日志。主机不能独立测出无线丢包率或真实逐对TWR频率，相应诊断为unknown。
+直接给消费者播放已有 observations 时，停止驱动与 bridge：
 
-不push，不修改相邻LIUO优化器。软件缓存不构建长期Anchor图，不提供虚构方差、NLOS判定、自动多跳或Wi-Fi/Ethernet通路。
+```bash
+rosbag play /home/mint/ws_calib/evidence/uwb_ros1/session.bag \
+  --wait-for-subscribers --delay 1 --topics /liuo/uwb/observations
+```
+
+从 stamped 重新生成观测时，只启动 replay bridge，不打开串口、不播放旧 observations：
+
+```bash
+roslaunch liuo_uwb_bridge replay.launch
+# 另一终端，启动消费者后：
+rosbag play /home/mint/ws_calib/evidence/uwb_ros1/session.bag \
+  --clock --wait-for-subscribers --delay 1 --topics \
+  /uwb/n0/nlink_linktrack_nodeframe3_stamped /uwb/n0/nlink_linktrack_nodeframe0_stamped
+# 每次重播或seek之前显式重置；不要用无重置的 --loop。
+rosservice call /liuo_uwb_bridge/reset_replay '{}'
+rosbag play /home/mint/ws_calib/evidence/uwb_ros1/session.bag \
+  --clock --start 1 --wait-for-subscribers --delay 1 --topics \
+  /uwb/n0/nlink_linktrack_nodeframe3_stamped /uwb/n0/nlink_linktrack_nodeframe0_stamped
+```
+
+回放参数与录制的 registry/帧类型必须一致。空格暂停/继续；模拟时间倒退会使映射失效。记录的 received_stamp 不被回放当前时间覆盖，单调时间按记录差值使用。ROS2 bag 无法直接作为 ROS1 bag 读取。TCPROS 有界队列、非 latch，不承诺 ROS2 best_effort 等价语义。
+
+## 文档边界
+
+[需求书](docs/uwb_ros1_development_requirements.md)、[迁移说明](docs/ros1_migration.md)、[实施日志](docs/ros1_implementation_log.md) 为本分支依据。`docs/software_acceptance.md`、`ros2_*`、`docs/ros2_reference/` 是冻结 ROS2 资料，里面另一台机器路径和测试不算本次证据。`CMakeLists.ros1.txt`、`package.ros1.xml`、旧 `src/linktrack` 和旧 `docs/README.ros1.*` 仅历史参考；当前 ROS1 入口是 `src/ros1`，其他历史 AOA/TOF/IoT 节点不在活动构建内。

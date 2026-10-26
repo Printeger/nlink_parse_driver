@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-out=/home/dev/ws_iap/uwb_ros2/nlink-sanitizer
+out=/home/mint/ws_calib/evidence/uwb_ros1/nlink-sanitizer
 mkdir -p "$out"
 vendor="$root/packages/nlink_parser/src/utils/nlink_unpack"
 objects=()

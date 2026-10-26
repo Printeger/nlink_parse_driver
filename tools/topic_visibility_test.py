@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Installed launch: selected topics only, with both local and remote PTY input.
 
-Run in an unused ROS_DOMAIN_ID; all serial inputs are synthetic.
+Run in an unused ROS_MASTER_URI; all serial inputs are synthetic.
 """
 import argparse
 import json
@@ -12,19 +12,20 @@ import signal
 import subprocess
 import time
 
-import rclpy
-from rclpy.qos import qos_profile_sensor_data
+import rospy
+from ros1_test_support import TestNode, spin_wall
 import yaml
-from ament_index_python.packages import get_package_share_directory
+import rospkg
+def get_package_share_directory(name): return rospkg.RosPack().get_path(name)
 from liuo_uwb_msgs.msg import UwbObservationBatch
 from pty_bridge_test import data_frame, encode, packet, range_frame, root
 
 
-def check(node, out, frame, data):
+def check(node, out, frame, data, namespace="/uwb/n0"):
     out.mkdir(parents=True, exist_ok=True)
     share = Path(get_package_share_directory('liuo_uwb_bridge'))
     config = yaml.safe_load((share / 'config/uwb.yaml').read_text())
-    params = config['/**']['ros__parameters']
+    params = config
     assert params['publish_debug_topics'] is False
     params.update(range_frame=frame, data_frame=data, simulator=True)
     config_path = out / 'uwb.yaml'
@@ -37,29 +38,27 @@ def check(node, out, frame, data):
         for raw, logical in [(19, 0), (12, 12), (1, 1)]
     ]}))
     received = []
-    sub = node.create_subscription(UwbObservationBatch, '/liuo/uwb/observations',
-                                   received.append, qos_profile_sensor_data)
+    sub = node.subscribe(UwbObservationBatch, '/liuo/uwb/observations',
+                                   received.append, 100)
     master, slave = pty.openpty()
     log = (out / 'launch.log').open('w')
     proc = subprocess.Popen([
-        'ros2', 'launch', 'liuo_uwb_bridge', 'robot.launch.py',
+        'roslaunch', 'liuo_uwb_bridge', 'robot.launch',
         f'port:={os.ttyname(slave)}', f'config:={config_path}',
-        f'registry:={registry}',
+        f'registry:={registry}', f'namespace:={namespace}', 'baud:=460800',
     ], stdout=log, stderr=log, start_new_session=True)
 
     def spin(seconds):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
-            rclpy.spin_once(node, timeout_sec=.02)
+            spin_wall(node, timeout_sec=.02)
 
     def topics():
-        if ('linktrack', '/uwb/n0') not in node.get_node_names_and_namespaces():
-            return set()
-        return {name for name, _ in node.get_publisher_names_and_types_by_node(
-            'linktrack', '/uwb/n0') if name.startswith('/uwb/n0/')}
+        return {topic for topic, owners in node.publishers().items()
+                if namespace+'/linktrack' in owners and topic.startswith(namespace+'/')}
 
-    expected = {'/uwb/n0/nlink_diagnostics'} | {
-        f'/uwb/n0/nlink_linktrack_nodeframe{i}_stamped' for i in [frame, data]
+    expected = {namespace+'/nlink_diagnostics'} | {
+        f'{namespace}/nlink_linktrack_nodeframe{i}_stamped' for i in [frame, data]
     }
     try:
         end = time.monotonic() + 8
@@ -85,6 +84,10 @@ def check(node, out, frame, data):
         assert all(m.receiver_id == 0 for m in received)
         assert topics() == expected, topics()
         assert proc.poll() is None
+        assert rospy.get_param(namespace+'/linktrack/baud_rate')==460800
+        assert rospy.get_param('/liuo_uwb_bridge/input_namespace')==namespace
+        business=set(node.publishers())-{'/rosout','/rosout_agg','/clock'}
+        assert business==expected|{'/liuo/uwb/observations','/liuo/uwb/diagnostics'},business
         return dict(range_frame=frame, data_frame=data, status='PASS',
                     driver_topics=sorted(topics()), edges=sorted(edges))
     finally:
@@ -98,7 +101,7 @@ def check(node, out, frame, data):
         log.close()
         os.close(master)
         os.close(slave)
-        node.destroy_subscription(sub)
+        sub.unregister()
         spin(.3)
 
 
@@ -106,15 +109,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    rclpy.init()
-    node = rclpy.create_node('topic_visibility_acceptance')
+    node = TestNode('topic_visibility_acceptance')
     try:
         results = [check(node, Path(args.output) / f'{frame}-{data}', frame, data)
                    for frame, data in [(3, 0), (2, 0), (5, 6)]]
+        results.append(check(node,Path(args.output)/'namespace',3,0,'/test/override'))
         print(json.dumps(results, indent=2))
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        node.close()
+        pass
 
 
 if __name__ == '__main__':

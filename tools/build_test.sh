@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Invoke with data-run -- tools/build_test.sh. Output never enters the repository.
-set -euo pipefail
-root=$(cd "$(dirname "$0")/.." && pwd)
-out=/home/dev/ws_iap/uwb_ros2
-set +u
-source /opt/ros/jazzy/setup.bash
-set -u
-mkdir -p "$out/evidence"
-colcon --log-base "$out/log" build --base-paths "$root/packages" \
- --build-base "$out/build" --install-base "$out/install" --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
-colcon --log-base "$out/log" test --base-paths "$root/packages" --build-base "$out/build" --install-base "$out/install" --test-result-base "$out/test-results" --return-code-on-test-failure
-colcon --log-base "$out/log" test-result --test-result-base "$out/test-results" --verbose
+set -eo pipefail
+ws=/home/mint/ws_calib
+export TMPDIR="$ws/evidence/uwb_ros1/tmp"
+export PYTHONDONTWRITEBYTECODE=1
+mkdir -p "$TMPDIR"
+source /opt/ros/noetic/setup.bash
+catkin config --workspace "$ws" --profile uwb_ros1 --extend /opt/ros/noetic \
+ --build-space build_uwb_ros1 --devel-space devel_uwb_ros1 \
+ --install-space install_uwb_ros1 --log-space logs_uwb_ros1 \
+ --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPYTHON_EXECUTABLE=/usr/bin/python3
+catkin build --workspace "$ws" --profile uwb_ros1 nlink_parser liuo_uwb_msgs liuo_uwb_protocol liuo_uwb_bridge -j4 -p2 --no-status
+for package in liuo_uwb_protocol liuo_uwb_bridge; do
+ (cd "$ws/build_uwb_ros1/$package" && ctest --output-on-failure)
+done

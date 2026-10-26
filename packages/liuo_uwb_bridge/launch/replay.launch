@@ -1,0 +1,13 @@
+<launch>
+  <arg name="config" default="$(find liuo_uwb_bridge)/config/uwb.yaml"/>
+  <arg name="registry" default="$(find liuo_uwb_bridge)/config/registry.yaml"/>
+  <arg name="namespace" default="/uwb/n0"/>
+  <arg name="use_sim_time" default="true"/>
+  <param name="/use_sim_time" value="$(arg use_sim_time)"/>
+  <node pkg="liuo_uwb_bridge" type="range_bridge" name="liuo_uwb_bridge" output="screen" required="true">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="registry_path" value="$(arg registry)"/>
+    <param name="input_namespace" value="$(arg namespace)"/>
+    <param name="replay_mode" value="true"/>
+  </node>
+</launch>

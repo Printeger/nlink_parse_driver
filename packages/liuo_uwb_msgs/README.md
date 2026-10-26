@@ -36,7 +36,7 @@ N0 串口 → nlink_parser/linktrack（唯一串口所有者）
 
 ## 2. 消息格式
 
-以下字段与实际 `.msg` 文件对应。ROS 消息通过 ROS2 的序列化机制传输；它不是串口上的 `~U:` + Base64 + LF 文本。30 字节头、8 字节边、CRC、每包最多 5 条/100 字节的限制属于 Range Relay v1 无线数传 envelope，不是所有 ROS batch 的长度限制。
+以下字段与实际 `.msg` 文件对应。ROS 消息通过 ROS1 的序列化机制传输；它不是串口上的 `~U:` + Base64 + LF 文本。30 字节头、8 字节边、CRC、每包最多 5 条/100 字节的限制属于 Range Relay v1 无线数传 envelope，不是所有 ROS batch 的长度限制。
 
 ### UwbObservationBatch：一次输出事件
 
@@ -86,8 +86,8 @@ UwbObservation[] observations
 | `source_local_time_valid` | `bool` | 原始 local time 是否有效 |
 | `source_system_time_valid` | `bool` | 原始 system time 是否有效；DR_MODE1 始终为 false，不等于跨节点已同步 |
 | `time_basis` | `uint8` | 下表所列的时间依据 |
-| `source_frame_stamp` | `builtin_interfaces/Time` | 映射到 ROS 时间域的源帧时间；无有效映射时为 `{sec: 0, nanosec: 0}` |
-| `received_stamp` | `builtin_interfaces/Time` | 完成接收输入帧的那次串口 read 的 ROS 时间；远端为 N0 收到报告的时间 |
+| `source_frame_stamp` | `time` | 映射到 ROS 时间域的源帧时间；无有效映射时为 `{secs: 0, nsecs: 0}` |
+| `received_stamp` | `time` | 完成接收输入帧的那次串口 read 的 ROS 时间；远端为 N0 收到报告的时间 |
 | `source_hold_age_ms` | `uint16` | 远端源帧在发送端持有至封包的年龄，毫秒；不是完整端到端延迟 |
 | `source_hold_age_valid` | `bool` | hold age 是否可用；本地为 false，数值初始化为 65535，不能当有效年龄 |
 | `time_uncertainty_s` | `float32` | 时间不确定度，单位秒；当前未知，输出 NaN，不能解释为 0 |
@@ -127,126 +127,25 @@ tx_cycle_seq: 9
 shard_index: 0
 shard_count: 2
 time_basis: 0
-source_frame_stamp: {sec: 0, nanosec: 0}
+source_frame_stamp: {secs: 0, nsecs: 0}
 distance_m: 4.25
 pair_measurement_freshness_verified: false
 ```
 
 这是**示意字段片段，不是实测记录或可直接发布的完整消息**：固定节点 N2 报告到 N7 的距离为 4.25 m，来自源帧 123、发送轮次 9 的第一个分包。它不说明第二个包已收到，也不说明该距离具有已同步的测量时间或已验证的逐对新鲜度。
 
-## 3. 构建、启动与查看
+## 3. ROS1 消费与消息兼容
 
-本机的 `data-run` 是数据盘执行启动器，用于将运行产物限制在 `/home/dev/ws_iap`；不是 ROS 命令。构建步骤和安装依赖详见[仓库 README](../../README.md)。
-
-```bash
-cd /home/dev/code/ws_tunnel/src/nlink_parser_uwb
-data-run --check
-data-run -- tools/build_test.sh
-```
-
-先按真实设备修改[注册表](../liuo_uwb_bridge/config/registry.yaml)和[参数文件](../liuo_uwb_bridge/config/uwb.yaml)。示例身份和 `unconfirmed` 模式不代表已检测到真实设备。再启动驱动与 bridge：
+构建/启动/诊断/录包回放命令见[当前 README](../../README.md)。加载 Noetic 和本任务 devel/install 后：
 
 ```bash
-data-run -- bash -c 'source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/uwb_ros2/install/setup.bash; ros2 launch liuo_uwb_bridge robot.launch.py port:=/dev/ttyUSB0 baud:=921600 namespace:=/uwb/n0 use_sim_time:=false'
+rosmsg show liuo_uwb_msgs/UwbObservationBatch
+rosmsg md5 liuo_uwb_msgs/UwbObservation
+rosrun liuo_uwb_bridge observation_reader.py
 ```
 
-在另一个终端进入受保护的 ROS 环境，后续命令都在这个 shell 内运行：
+Python 消费者依赖 `rospy` 和 `liuo_uwb_msgs`，读取 `rospy.Time.secs/nsecs` 或 `to_nsec()`。C++ 包依赖 `roscpp` 和 `liuo_uwb_msgs`，包含 `liuo_uwb_msgs/UwbObservationBatch.h`，使用生成类型 `liuo_uwb_msgs::UwbObservationBatch::ConstPtr`，并在目标上添加 `${catkin_EXPORTED_TARGETS}` 生成依赖。
 
-```bash
-data-run -- bash
-source /opt/ros/jazzy/setup.bash
-source /home/dev/ws_iap/uwb_ros2/install/setup.bash
+ROS1 Header 另含 seq，由发布层管理，不替代 batch_seq/rx_frame_seq/source_frame_seq，不用于去重。原始设备 local_time 是毫秒；旧消费者须重编译并检查时间含义。不承诺 ROS1 与 ROS2 的 MD5、序列化或 bag 兼容。
 
-ros2 interface show liuo_uwb_msgs/msg/UwbObservationBatch
-ros2 interface show liuo_uwb_msgs/msg/UwbObservation
-ros2 topic info /liuo/uwb/observations --verbose
-ros2 topic echo /liuo/uwb/observations \
-  liuo_uwb_msgs/msg/UwbObservationBatch --qos-reliability best_effort
-```
-
-没有数据时，检查串口、设备输出帧类型、registry 身份及 `/liuo/uwb/diagnostics`。默认测距/数传帧为 3/0，可配置为 2/0 或 5/6 等受支持组合。仅构建消息包或启动消费者不会产生观测。
-
-## 4. Python 订阅示例
-
-在上面的受保护 ROS shell 中直接运行下面的代码。它逐条打印距离和时间依据，不把未知时间转换为测量时间；这里使用 best-effort QoS 匹配默认发布者。可靠订阅者不能匹配 best-effort 发布者。
-
-```bash
-python3 - <<'PY'
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
-from liuo_uwb_msgs.msg import UwbObservation, UwbObservationBatch
-
-class Reader(Node):
-    def __init__(self):
-        super().__init__('uwb_observation_reader')
-        qos = QoSProfile(
-            depth=100,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.VOLATILE,
-        )
-        self.subscription = self.create_subscription(
-            UwbObservationBatch, '/liuo/uwb/observations', self.on_batch, qos)
-
-    def on_batch(self, batch):
-        for obs in batch.observations:
-            mapped = obs.time_basis in (
-                UwbObservation.TIME_FRAME_LOCAL_MAPPED,
-                UwbObservation.TIME_FRAME_SYSTEM_MAPPED,
-            )
-            source_time = (
-                f'{obs.source_frame_stamp.sec}.{obs.source_frame_stamp.nanosec:09d}'
-                if mapped else 'unknown'
-            )
-            self.get_logger().info(
-                f'dataset={batch.driver_session_id} batch={batch.batch_seq} '
-                f'source_session={obs.source_session_id} '
-                f'edge={obs.node_a}->{obs.node_b} reporter={obs.reporter_id} '
-                f'distance={obs.distance_m:.3f}m source_time={source_time} '
-                f'time_basis={obs.time_basis} '
-                f'freshness_verified={obs.pair_measurement_freshness_verified}')
-
-rclpy.init()
-node = Reader()
-try:
-    rclpy.spin(node)
-except KeyboardInterrupt:
-    pass
-finally:
-    node.destroy_node()
-    if rclpy.ok():
-        rclpy.shutdown()
-PY
-```
-
-项目化使用时，在消费者的 `package.xml` 中加入 `<depend>liuo_uwb_msgs</depend>`；Python 节点还需要 `rclpy`。C++ 节点包含 `liuo_uwb_msgs/msg/uwb_observation_batch.hpp`，在 CMake 中 `find_package(liuo_uwb_msgs REQUIRED)`，并将 `liuo_uwb_msgs` 加入目标依赖。
-
-消费者若要跨重启持久化观测身份，应同时保存网络配置、`driver_session_id`、`source_session_id`、reporter、有效源帧序号及端点。不要只用距离值或 `tx_cycle_seq` 去重，也不要把序号跳号直接解释成无线丢包。
-
-## 5. 录包、回放与接入边界
-
-使用仓库工具同时记录原始帧、stamped 帧、观测和诊断：
-
-```bash
-cd /home/dev/code/ws_tunnel/src/nlink_parser_uwb
-data-run -- tools/record.sh /home/dev/ws_iap/uwb_ros2/my_observation_bag
-```
-
-回放有两种用途：直接播放已录制的 `/liuo/uwb/observations` 给消费者，或者播放 stamped 帧给 `replay_mode=true` 的 bridge 重新生成观测。不要同时播放旧观测又让 bridge 生成同一批观测。完整命令、QoS 文件及重复/seek 前的 `reset_replay` 操作见[主 README 的录包与回放](../../README.md#录包与回放)。
-
-此消息不能直接替代相邻 LIUO 的 `UwbRange`：后者需要有效测量时间及 `variance_m2`，而本消息没有虚构方差。接入优化器前需明确时间依据接受策略、噪声标定和双向边相关性，详见 [LIUO 接入合同](../../docs/liuo_integration_contract.md)。
-
-## 6. 带来的效果与已验证范围
-
-| 效果 | 具体变化 |
-|---|---|
-| 下游接口统一 | 消费者通过一个话题处理本地机器人边和远端固定边，不必自行解码多种 LinkTrack 帧或 Base64 envelope |
-| 来源可追踪 | 每条边携带报告者、源会话、源帧、发送轮次及分包信息，可区分重发与新源帧 |
-| 时间含义明确 | 分开源帧时间、接收时间和发布时刻，未知状态显式保留，避免伪同步 |
-| 动态流即时输出 | 本地流不等待固定端 5 Hz 轮次，远端缺包不阻塞已收到的边 |
-| 便于复现故障 | stamped 接收上下文、会话和回放策略支持从原始输入重新生成观测 |
-| 保留原始数据用途 | 距离保持源值，RSSI 及有效性明确；不添加 Anchor 地图、NLOS 猜测或滤波后的伪原始距离 |
-
-已有软件验收中，60 秒 PTY 负载包含九条本地边**各 50 Hz**和三个发送者的 24 条远端有向边**各 5 Hz**，并覆盖慢订阅者。read 完成到 bridge 回调的峰值延迟约 0.583 ms；它不是射频延迟、真实测量年龄或完整消费者延迟。详细证据见[软件验收报告](../../docs/software_acceptance.md)。
-
-这些结果验证软件处理能力，不证明真实 UWB 测距频率、无线透传成功率或定位精度提高。板级固件、真实无线、长时间实机运行及 LIUO 融合仍待[硬件验收](../../docs/hardware_acceptance.md)。ROS1 原消息字段保留，但现交付为 ROS2；设备 `local_time` 已恢复毫秒语义，迁移消费者时须按[迁移说明](../../docs/ros2_migration.md)调整。
+软件测试来源均为合成 PTY，当前证据见[ROS1验收](../../docs/ros1_software_acceptance.md)。真实硬件能力未确认；统一观测不能直接替代既有 LIUO UwbRange，不填虚构 variance，详见[接入合同](../../docs/liuo_integration_contract.md)。

@@ -22,5 +22,10 @@ int main(){
  r=clock.observe(1,4000000000ull,1700000003000000000ll);assert(r.reset && !r.mapped);
  for(uint32_t i=1;i<20;++i)r=clock.observe(1+20*i,4000000000ull+20000000ull*i,1700000003000000000ll+20000000ll*i);
  assert(r.mapped);r=clock.observe(401,4400000000ull,1700000033400000000ll);assert(r.reset&&!r.mapped);
+ ClockMapper paused;
+ for(uint32_t i=0;i<20;++i)r=paused.observe(i*20,1000000000ull+i*20000000ull,100000000000ll+i*20000000ll);
+ assert(r.mapped);
+ r=paused.observe(400,1400000000ull,100380000000ll);assert(r.reset&&!r.mapped);
+ r=paused.observe(420,1420000000ull,0);assert(!r.mapped);
  std::cout<<"PASS: sequence wrap/out-of-order/retirement/capacity, sender isolation/resync/expiry, clock drift/wrap/restart/ROS jump\n";
 }

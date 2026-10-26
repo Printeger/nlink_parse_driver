@@ -1,31 +1,28 @@
-/**:
-  ros__parameters:
-    operating_mode: unconfirmed
-    network_instance: tunnel_unconfirmed
-    system_id: 0
-    capacity: 0
-    simulator: false
-    range_frame: 3
-    data_frame: 0
-    # Only publish the selected stamped inputs; enable all raw/stamped topics for debugging.
-    publish_debug_topics: false
-    input_namespace: /uwb/n0
-    shared_system_clock: false
-    clock_domain: ""
-    fixed_to_fixed_local_range: false
-    simultaneous_ranging_and_data: false
-    hundred_byte_payload: false
-    pair_freshness_guaranteed: false
-    allow_rate_degrade: false
-    forward_received_reports: false
-    enable_legacy_tx: false
-    baud_rate: 921600
-    serial_timeout_ms: 10
-    reconnect_interval_ms: 500
-    max_nlink_rx_frame_bytes: 8192
-    rx_ring_bytes: 16384
-    max_read_chunk: 4096
-    max_distance_mm: 8388607
-    dedup_max_entries: 10000
-    reliable_qos: false
-    replay_mode: false
+operating_mode: unconfirmed
+network_instance: tunnel_unconfirmed
+system_id: 0
+capacity: 0
+simulator: false
+range_frame: 3
+data_frame: 0
+# Only publish the selected stamped inputs; enable all raw/stamped topics for debugging.
+publish_debug_topics: false
+input_namespace: /uwb/n0
+shared_system_clock: false
+clock_domain: ""
+fixed_to_fixed_local_range: false
+simultaneous_ranging_and_data: false
+hundred_byte_payload: false
+pair_freshness_guaranteed: false
+allow_rate_degrade: false
+forward_received_reports: false
+enable_legacy_tx: false
+baud_rate: 921600
+serial_timeout_ms: 10
+reconnect_interval_ms: 500
+max_nlink_rx_frame_bytes: 8192
+rx_ring_bytes: 16384
+max_read_chunk: 4096
+max_distance_mm: 8388607
+dedup_max_entries: 10000
+replay_mode: false

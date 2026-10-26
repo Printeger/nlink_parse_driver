@@ -1,0 +1,21 @@
+<launch>
+  <arg name="port" default="/dev/ttyACM0"/>
+  <arg name="baud" default="921600"/>
+  <arg name="config" default="$(find liuo_uwb_bridge)/config/uwb.yaml"/>
+  <arg name="registry" default="$(find liuo_uwb_bridge)/config/registry.yaml"/>
+  <arg name="namespace" default="/uwb/n0"/>
+  <arg name="use_sim_time" default="false"/>
+  <param name="/use_sim_time" value="$(arg use_sim_time)"/>
+  <group ns="$(arg namespace)">
+    <node pkg="nlink_parser" type="linktrack" name="linktrack" output="screen" required="true">
+      <rosparam command="load" file="$(arg config)"/>
+      <param name="port_name" value="$(arg port)"/>
+      <param name="baud_rate" value="$(arg baud)" type="int"/>
+    </node>
+  </group>
+  <node pkg="liuo_uwb_bridge" type="range_bridge" name="liuo_uwb_bridge" output="screen" required="true">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="registry_path" value="$(arg registry)"/>
+    <param name="input_namespace" value="$(arg namespace)"/>
+  </node>
+</launch>
